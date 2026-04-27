@@ -58,7 +58,7 @@ export function buildCutoutPhoto(
   };
 }
 
-function blobToDataUrl(blob: Blob) {
+export function blobToDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));

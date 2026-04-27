@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { generateDesigns } from "../lib/pickguard/patternGenerator";
 import { pickguardTemplates } from "../lib/pickguard/templates";
 import { buildCutoutPhoto } from "../lib/pickguard/backgroundRemoval";
+import {
+  buildColorRefinedManualCutoutPhoto,
+  buildManualCutoutPhoto,
+  getDominantExteriorRingColor,
+  getManualCutoutBounds,
+  getManualCutoutMaskPoints,
+  getInsetPolygonPoints,
+  removeConnectedSimilarColorPixels,
+} from "../lib/pickguard/manualCutout";
 import { buildStringOverlaySvg, buildSvgPackage } from "../lib/pickguard/exporters";
 import {
   clampStringGuidePoint,
@@ -122,3 +132,242 @@ describe("AI background removal helpers", () => {
     });
   });
 });
+
+describe("manual pickguard cutout helpers", () => {
+  it("crops the transparent output to the selected polygon bounds", () => {
+    const source = {
+      dataUrl: "data:image/png;base64,guitar",
+      name: "full-guitar.png",
+      width: 1000,
+      height: 800,
+    };
+    const bounds = getManualCutoutBounds(
+      source,
+      [
+        { x: 260, y: 180 },
+        { x: 620, y: 210 },
+        { x: 650, y: 520 },
+        { x: 220, y: 500 },
+      ],
+      12,
+    );
+
+    assert.deepEqual(bounds, { x: 208, y: 168, width: 454, height: 364 });
+
+    assert.deepEqual(
+      buildManualCutoutPhoto(
+        source,
+        "data:image/png;base64,manual",
+        bounds,
+      ),
+      {
+        dataUrl: "data:image/png;base64,manual",
+        name: "full-guitar-manual-cutout.png",
+        width: 454,
+        height: 364,
+      },
+    );
+  });
+
+  it("does not create manual bounds until at least three points are selected", () => {
+    const bounds = getManualCutoutBounds(
+      { width: 1000, height: 800 },
+      [
+        { x: 260, y: 180 },
+        { x: 620, y: 210 },
+      ],
+    );
+
+    assert.equal(bounds, null);
+  });
+
+  it("labels color-refined manual cutouts while preserving the cropped dimensions", () => {
+    const source = {
+      dataUrl: "data:image/png;base64,guitar",
+      name: "full-guitar.png",
+    };
+
+    assert.deepEqual(
+      buildColorRefinedManualCutoutPhoto(
+        source,
+        "data:image/png;base64,refined",
+        { x: 208, y: 168, width: 454, height: 364 },
+      ),
+      {
+        dataUrl: "data:image/png;base64,refined",
+        name: "full-guitar-color-refined-cutout.png",
+        width: 454,
+        height: 364,
+      },
+    );
+  });
+
+  it("can trim a rough outline inward without changing the original point order", () => {
+    const inset = getInsetPolygonPoints(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ],
+      10,
+    );
+
+    assert.deepEqual(inset, [
+      { x: 7.07, y: 7.07 },
+      { x: 92.93, y: 7.07 },
+      { x: 92.93, y: 92.93 },
+      { x: 7.07, y: 92.93 },
+    ]);
+  });
+
+  it("translates the selected outline into cropped mask coordinates for color refinement", () => {
+    const points = [
+      { x: 260, y: 180 },
+      { x: 620, y: 210 },
+      { x: 650, y: 520 },
+      { x: 220, y: 500 },
+    ];
+    const bounds = getManualCutoutBounds(
+      { width: 1000, height: 800 },
+      points,
+      2,
+    );
+
+    assert.deepEqual(
+      getManualCutoutMaskPoints(points, bounds!),
+      [
+        { x: 42, y: 2 },
+        { x: 402, y: 32 },
+        { x: 432, y: 342 },
+        { x: 2, y: 322 },
+      ],
+    );
+  });
+
+  it("samples the guitar body color from just outside the selected outline", () => {
+    const width = 6;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 245, g: 245, b: 245, a: 255 });
+    setPixel(data, width, 1, 1, { r: 94, g: 196, b: 189, a: 255 });
+    setPixel(data, width, 1, 2, { r: 93, g: 194, b: 188, a: 255 });
+    setPixel(data, width, 1, 3, { r: 96, g: 197, b: 190, a: 255 });
+
+    assert.deepEqual(
+      getDominantExteriorRingColor(
+        data,
+        width,
+        height,
+        [
+          { x: 2, y: 1 },
+          { x: 4, y: 1 },
+          { x: 4, y: 3 },
+          { x: 2, y: 3 },
+        ],
+        1.25,
+      ),
+      { r: 94, g: 195, b: 189 },
+    );
+  });
+
+  it("removes only edge-connected body color while keeping dark pickguard artwork", () => {
+    const width = 5;
+    const height = 4;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 42, g: 34, b: 32, a: 255 });
+
+    for (let y = 0; y < height; y += 1) {
+      setPixel(data, width, 0, y, { r: 93, g: 194, b: 188, a: 255 });
+      setPixel(data, width, 1, y, { r: 97, g: 197, b: 191, a: 255 });
+    }
+    setPixel(data, width, 3, 2, { r: 91, g: 190, b: 185, a: 255 });
+
+    const removed = removeConnectedSimilarColorPixels(
+      data,
+      width,
+      height,
+      { r: 94, g: 196, b: 189 },
+    );
+
+    assert.equal(removed, 8);
+    assert.equal(getPixelAlpha(data, width, 0, 2), 0);
+    assert.equal(getPixelAlpha(data, width, 1, 2), 0);
+    assert.equal(getPixelAlpha(data, width, 2, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 3, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 4, 2), 255);
+  });
+});
+
+describe("upload panel hydration guard", () => {
+  it("suppresses upload drop attribute mismatches from cursor extensions", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /<label\s+className="upload-drop"\s+suppressHydrationWarning/);
+  });
+
+  it("uses deterministic clean outline for manual cutouts instead of eager refinement imports", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.doesNotMatch(
+      source,
+      /import \{[^}]*createColorRefinedManualCutout[^}]*\} from/,
+    );
+    assert.match(source, /createManualCutout\(sourcePhoto, manualPoints, \{[\s\S]*insetPx: manualInset/);
+    assert.match(source, /Clean body color/);
+  });
+
+  it("passes edge trim into color manual refinement", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /createColorRefinedManualCutout\([\s\S]*sourcePhoto,[\s\S]*manualPoints,[\s\S]*\{[\s\S]*insetPx: manualInset/);
+  });
+});
+
+type TestPixel = {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+};
+
+function fillPixels(data: Uint8ClampedArray, pixel: TestPixel) {
+  for (let index = 0; index < data.length; index += 4) {
+    data[index] = pixel.r;
+    data[index + 1] = pixel.g;
+    data[index + 2] = pixel.b;
+    data[index + 3] = pixel.a;
+  }
+}
+
+function setPixel(
+  data: Uint8ClampedArray,
+  width: number,
+  x: number,
+  y: number,
+  pixel: TestPixel,
+) {
+  const index = (y * width + x) * 4;
+  data[index] = pixel.r;
+  data[index + 1] = pixel.g;
+  data[index + 2] = pixel.b;
+  data[index + 3] = pixel.a;
+}
+
+function getPixelAlpha(
+  data: Uint8ClampedArray,
+  width: number,
+  x: number,
+  y: number,
+) {
+  return data[(y * width + x) * 4 + 3];
+}

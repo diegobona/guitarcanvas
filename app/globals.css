@@ -237,6 +237,87 @@ a {
   transition: width 160ms ease;
 }
 
+.manual-cutout-actions {
+  margin-top: 10px;
+}
+
+.manual-cutout-editor {
+  background: #111318;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px;
+}
+
+.manual-cutout-frame {
+  background:
+    linear-gradient(45deg, #17191f 25%, transparent 25%),
+    linear-gradient(-45deg, #17191f 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #17191f 75%),
+    linear-gradient(-45deg, transparent 75%, #17191f 75%),
+    #0c0d10;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  background-size: 16px 16px;
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  cursor: crosshair;
+  overflow: hidden;
+  position: relative;
+  touch-action: none;
+  width: 100%;
+}
+
+.manual-cutout-frame img,
+.manual-cutout-frame svg {
+  display: block;
+  height: 100%;
+  inset: 0;
+  object-fit: contain;
+  position: absolute;
+  user-select: none;
+  width: 100%;
+}
+
+.manual-cutout-frame svg {
+  overflow: visible;
+  pointer-events: none;
+}
+
+.manual-cutout-fill {
+  fill: rgba(215, 168, 79, 0.22);
+  stroke: none;
+}
+
+.manual-cutout-line {
+  fill: none;
+  stroke: #f0bf61;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 0.75;
+}
+
+.manual-cutout-point {
+  fill: #46d9ff;
+  stroke: #0b2630;
+  stroke-width: 0.45;
+}
+
+.manual-cutout-toolbar {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 42px 42px 1fr;
+}
+
+.manual-color-button {
+  grid-column: 1 / -1;
+}
+
 .template-grid,
 .design-grid,
 .export-grid {
