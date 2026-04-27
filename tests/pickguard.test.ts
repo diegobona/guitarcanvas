@@ -6,13 +6,18 @@ import { generateDesigns } from "../lib/pickguard/patternGenerator";
 import { pickguardTemplates } from "../lib/pickguard/templates";
 import { buildCutoutPhoto } from "../lib/pickguard/backgroundRemoval";
 import {
-  buildColorRefinedManualCutoutPhoto,
+  applyConstrainedSegmentationAlpha,
+  applyPointSegmentationMaskToManualCutout,
+  applyPointSegmentationPreviewPixels,
+  buildConstrainedSegmentedManualCutoutPhoto,
+  buildPointSegmentedManualCutoutPhoto,
+  buildPointSegmentationPreviewPhoto,
   buildManualCutoutPhoto,
-  getDominantExteriorRingColor,
   getManualCutoutBounds,
   getManualCutoutMaskPoints,
   getInsetPolygonPoints,
-  removeConnectedSimilarColorPixels,
+  removeNeutralEdgeFringePixels,
+  selectPointSegmentationMask,
 } from "../lib/pickguard/manualCutout";
 import { buildStringOverlaySvg, buildSvgPackage } from "../lib/pickguard/exporters";
 import {
@@ -181,23 +186,66 @@ describe("manual pickguard cutout helpers", () => {
     assert.equal(bounds, null);
   });
 
-  it("labels color-refined manual cutouts while preserving the cropped dimensions", () => {
+  it("labels constrained segmented manual cutouts while preserving the cropped dimensions", () => {
     const source = {
       dataUrl: "data:image/png;base64,guitar",
       name: "full-guitar.png",
     };
 
     assert.deepEqual(
-      buildColorRefinedManualCutoutPhoto(
+      buildConstrainedSegmentedManualCutoutPhoto(
         source,
         "data:image/png;base64,refined",
         { x: 208, y: 168, width: 454, height: 364 },
       ),
       {
         dataUrl: "data:image/png;base64,refined",
-        name: "full-guitar-color-refined-cutout.png",
+        name: "full-guitar-constrained-segmented-cutout.png",
         width: 454,
         height: 364,
+      },
+    );
+  });
+
+  it("labels point segmented manual cutouts while preserving the cropped dimensions", () => {
+    const source = {
+      dataUrl: "data:image/png;base64,guitar",
+      name: "full-guitar.png",
+    };
+
+    assert.deepEqual(
+      buildPointSegmentedManualCutoutPhoto(
+        source,
+        "data:image/png;base64,point",
+        { x: 208, y: 168, width: 454, height: 364 },
+      ),
+      {
+        dataUrl: "data:image/png;base64,point",
+        name: "full-guitar-point-segmented-cutout.png",
+        width: 454,
+        height: 364,
+      },
+    );
+  });
+
+  it("labels point segmentation previews while preserving the source dimensions", () => {
+    const source = {
+      dataUrl: "data:image/png;base64,guitar",
+      name: "full-guitar.png",
+      width: 1000,
+      height: 800,
+    };
+
+    assert.deepEqual(
+      buildPointSegmentationPreviewPhoto(
+        source,
+        "data:image/png;base64,preview",
+      ),
+      {
+        dataUrl: "data:image/png;base64,preview",
+        name: "full-guitar-point-segmentation-preview.png",
+        width: 1000,
+        height: 800,
       },
     );
   });
@@ -221,7 +269,7 @@ describe("manual pickguard cutout helpers", () => {
     ]);
   });
 
-  it("translates the selected outline into cropped mask coordinates for color refinement", () => {
+  it("translates the selected outline into cropped mask coordinates for segmentation refinement", () => {
     const points = [
       { x: 260, y: 180 },
       { x: 620, y: 210 },
@@ -245,56 +293,161 @@ describe("manual pickguard cutout helpers", () => {
     );
   });
 
-  it("samples the guitar body color from just outside the selected outline", () => {
-    const width = 6;
-    const height = 5;
-    const data = new Uint8ClampedArray(width * height * 4);
-    fillPixels(data, { r: 245, g: 245, b: 245, a: 255 });
-    setPixel(data, width, 1, 1, { r: 94, g: 196, b: 189, a: 255 });
-    setPixel(data, width, 1, 2, { r: 93, g: 194, b: 188, a: 255 });
-    setPixel(data, width, 1, 3, { r: 96, g: 197, b: 190, a: 255 });
+  it("uses segmentation in the configurable edge band while preserving protected interior artwork", () => {
+    const width = 9;
+    const height = 9;
+    const manualData = new Uint8ClampedArray(width * height * 4);
+    const segmentData = new Uint8ClampedArray(width * height * 4);
+    fillPixels(manualData, { r: 0, g: 0, b: 0, a: 0 });
+    fillPixels(segmentData, { r: 0, g: 0, b: 0, a: 0 });
 
-    assert.deepEqual(
-      getDominantExteriorRingColor(
-        data,
-        width,
-        height,
-        [
-          { x: 2, y: 1 },
-          { x: 4, y: 1 },
-          { x: 4, y: 3 },
-          { x: 2, y: 3 },
-        ],
-        1.25,
-      ),
-      { r: 94, g: 195, b: 189 },
-    );
-  });
-
-  it("removes only edge-connected body color while keeping dark pickguard artwork", () => {
-    const width = 5;
-    const height = 4;
-    const data = new Uint8ClampedArray(width * height * 4);
-    fillPixels(data, { r: 42, g: 34, b: 32, a: 255 });
-
-    for (let y = 0; y < height; y += 1) {
-      setPixel(data, width, 0, y, { r: 93, g: 194, b: 188, a: 255 });
-      setPixel(data, width, 1, y, { r: 97, g: 197, b: 191, a: 255 });
+    for (let y = 1; y <= 7; y += 1) {
+      for (let x = 1; x <= 7; x += 1) {
+        setPixel(manualData, width, x, y, { r: 190, g: 150, b: 120, a: 255 });
+        setPixel(segmentData, width, x, y, { r: 190, g: 150, b: 120, a: 255 });
+      }
     }
-    setPixel(data, width, 3, 2, { r: 91, g: 190, b: 185, a: 255 });
 
-    const removed = removeConnectedSimilarColorPixels(
-      data,
+    setPixel(segmentData, width, 1, 4, { r: 190, g: 150, b: 120, a: 0 });
+    setPixel(segmentData, width, 3, 4, { r: 190, g: 150, b: 120, a: 0 });
+    setPixel(segmentData, width, 4, 4, { r: 190, g: 150, b: 120, a: 0 });
+
+    applyConstrainedSegmentationAlpha(
+      manualData,
+      segmentData,
       width,
       height,
-      { r: 94, g: 196, b: 189 },
+      { refineBandPx: 3 },
     );
 
-    assert.equal(removed, 8);
-    assert.equal(getPixelAlpha(data, width, 0, 2), 0);
+    assert.equal(getPixelAlpha(manualData, width, 1, 4), 0);
+    assert.equal(getPixelAlpha(manualData, width, 3, 4), 0);
+    assert.equal(getPixelAlpha(manualData, width, 4, 4), 255);
+    assert.equal(getPixelAlpha(manualData, width, 7, 4), 255);
+  });
+
+  it("applies a full-image point mask inside the cropped manual outline", () => {
+    const width = 4;
+    const height = 4;
+    const manualData = new Uint8ClampedArray(width * height * 4);
+    const maskData = new Float32Array(10 * 10);
+    fillPixels(manualData, { r: 190, g: 150, b: 120, a: 255 });
+
+    for (let y = 3; y <= 5; y += 1) {
+      for (let x = 3; x <= 5; x += 1) {
+        maskData[y * 10 + x] = 0.9;
+      }
+    }
+
+    applyPointSegmentationMaskToManualCutout(
+      manualData,
+      width,
+      height,
+      { x: 2, y: 2, width, height },
+      { width: 10, height: 10 },
+      { data: maskData, width: 10, height: 10 },
+      0.5,
+    );
+
+    assert.equal(getPixelAlpha(manualData, width, 0, 0), 0);
+    assert.equal(getPixelAlpha(manualData, width, 1, 1), 255);
+    assert.equal(getPixelAlpha(manualData, width, 0, 3), 0);
+  });
+
+  it("uses the confidence mask that contains the clicked target point", () => {
+    const backgroundMask = new Float32Array(4 * 4).fill(0.85);
+    const pickguardMask = new Float32Array(4 * 4).fill(0.05);
+    backgroundMask[2 * 4 + 2] = 0.1;
+    pickguardMask[2 * 4 + 2] = 0.95;
+
+    const selected = selectPointSegmentationMask(
+      [
+        { data: backgroundMask, width: 4, height: 4 },
+        { data: pickguardMask, width: 4, height: 4 },
+      ],
+      { x: 50, y: 50 },
+      { width: 100, height: 100 },
+    );
+
+    assert.equal(selected?.data, pickguardMask);
+  });
+
+  it("paints a translucent preview only where the selected mask is confident", () => {
+    const width = 4;
+    const height = 4;
+    const previewData = new Uint8ClampedArray(width * height * 4);
+    const maskData = new Float32Array(4 * 4);
+    maskData[1 * 4 + 1] = 0.9;
+    maskData[1 * 4 + 2] = 0.9;
+
+    applyPointSegmentationPreviewPixels(
+      previewData,
+      width,
+      height,
+      { width, height },
+      { data: maskData, width, height },
+      0.5,
+    );
+
+    assert.equal(getPixelAlpha(previewData, width, 0, 0), 0);
+    assert.equal(getPixelAlpha(previewData, width, 1, 1), 94);
+    assert.equal(previewData[(1 * width + 1) * 4], 56);
+    assert.equal(previewData[(1 * width + 1) * 4 + 1], 189);
+    assert.equal(previewData[(1 * width + 1) * 4 + 2], 248);
+  });
+
+  it("clips the point preview to the hand-drawn outline", () => {
+    const width = 4;
+    const height = 4;
+    const previewData = new Uint8ClampedArray(width * height * 4);
+    const maskData = new Float32Array(4 * 4).fill(0.9);
+
+    applyPointSegmentationPreviewPixels(
+      previewData,
+      width,
+      height,
+      { width, height },
+      { data: maskData, width, height },
+      0.5,
+      undefined,
+      [
+        { x: 1, y: 1 },
+        { x: 3, y: 1 },
+        { x: 3, y: 3 },
+        { x: 1, y: 3 },
+      ],
+    );
+
+    assert.equal(getPixelAlpha(previewData, width, 0, 0), 0);
+    assert.equal(getPixelAlpha(previewData, width, 1, 1), 94);
+    assert.equal(getPixelAlpha(previewData, width, 2, 2), 94);
+    assert.equal(getPixelAlpha(previewData, width, 3, 3), 0);
+  });
+
+  it("removes only neutral edge fringe while preserving warm pickguard and interior white parts", () => {
+    const width = 7;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 0, g: 0, b: 0, a: 0 });
+
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 5; x += 1) {
+        setPixel(data, width, x, y, { r: 190, g: 150, b: 118, a: 255 });
+      }
+    }
+
+    setPixel(data, width, 1, 2, { r: 235, g: 236, b: 234, a: 255 });
+    setPixel(data, width, 2, 2, { r: 226, g: 228, b: 225, a: 255 });
+    setPixel(data, width, 4, 2, { r: 244, g: 244, b: 238, a: 255 });
+
+    const removed = removeNeutralEdgeFringePixels(data, width, height, {
+      maxDistancePx: 3,
+    });
+
+    assert.equal(removed, 2);
     assert.equal(getPixelAlpha(data, width, 1, 2), 0);
-    assert.equal(getPixelAlpha(data, width, 2, 2), 255);
-    assert.equal(getPixelAlpha(data, width, 3, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 2, 2), 0);
+    assert.equal(getPixelAlpha(data, width, 1, 1), 255);
     assert.equal(getPixelAlpha(data, width, 4, 2), 255);
   });
 });
@@ -309,7 +462,7 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /<label\s+className="upload-drop"\s+suppressHydrationWarning/);
   });
 
-  it("uses deterministic clean outline for manual cutouts instead of eager refinement imports", () => {
+  it("uses deterministic clean outline for manual cutouts instead of eager segmentation imports", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",
       "utf8",
@@ -317,19 +470,58 @@ describe("upload panel hydration guard", () => {
 
     assert.doesNotMatch(
       source,
-      /import \{[^}]*createColorRefinedManualCutout[^}]*\} from/,
+      /import \{[^}]*createPointSegmentedManualCutout[^}]*\} from/,
     );
     assert.match(source, /createManualCutout\(sourcePhoto, manualPoints, \{[\s\S]*insetPx: manualInset/);
-    assert.match(source, /Clean body color/);
+    assert.match(source, /Segment from point/);
+    assert.doesNotMatch(source, /Clean body color/);
   });
 
-  it("passes edge trim into color manual refinement", () => {
+  it("passes edge trim and the current target point into point segmentation", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",
       "utf8",
     );
 
-    assert.match(source, /createColorRefinedManualCutout\([\s\S]*sourcePhoto,[\s\S]*manualPoints,[\s\S]*\{[\s\S]*insetPx: manualInset/);
+    assert.match(source, /createPointSegmentedManualCutout\([\s\S]*sourcePhoto,[\s\S]*manualPoints,[\s\S]*manualTargetPoint,[\s\S]*\{[\s\S]*insetPx: manualInset/);
+  });
+
+  it("lets a new target click replace the previous segmentation point", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /manualTargetPoint/);
+    assert.match(source, /setManualTargetPoint\(point\)/);
+    assert.doesNotMatch(source, /setManualTargetPoint\(\(current/);
+    assert.match(source, /Pick target/);
+    assert.match(source, /Segment from point/);
+  });
+
+  it("previews the point-selected region before applying the cutout", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /manualSegmentPreview/);
+    assert.match(source, /createPointSegmentationPreview/);
+    assert.match(source, /clipPoints: manualPoints/);
+    assert.match(source, /segmentPreview/);
+    assert.match(source, /manual-segment-preview/);
+  });
+
+  it("uses MediaPipe interactive segmentation instead of background removal for point prompts", () => {
+    const source = readFileSync(
+      "lib/pickguard/manualCutout.ts",
+      "utf8",
+    );
+
+    assert.match(source, /@mediapipe\/tasks-vision/);
+    assert.match(source, /InteractiveSegmenter/);
+    assert.match(source, /keypoint/);
+    assert.match(source, /createPointSegmentedManualCutout/);
   });
 });
 

@@ -1,5 +1,14 @@
+import type {
+  InteractiveSegmenter as InteractiveSegmenterTask,
+  MPMask,
+} from "@mediapipe/tasks-vision";
+
 import type { Point, UploadedPhoto } from "./geometry";
-import type { BackgroundRemovalProgress } from "./backgroundRemoval";
+import {
+  blobToDataUrl,
+  removeImageBackground,
+  type BackgroundRemovalProgress,
+} from "./backgroundRemoval";
 
 export type ManualCutoutBounds = {
   x: number;
@@ -13,19 +22,53 @@ type ImageBounds = {
   height: number;
 };
 
-type RgbColor = {
-  r: number;
-  g: number;
-  b: number;
-};
-
 type ManualCutoutOptions = {
   insetPx?: number;
 };
 
-type ColorManualCutoutOptions = ManualCutoutOptions & {
+type SegmentedManualCutoutOptions = ManualCutoutOptions & {
   onProgress?: (progress: BackgroundRemovalProgress) => void;
+  refineBandPx?: number;
 };
+
+type PointSegmentedManualCutoutOptions = ManualCutoutOptions & {
+  edgeFringePx?: number;
+  onProgress?: (progress: BackgroundRemovalProgress) => void;
+  threshold?: number;
+};
+
+type PointSegmentationPreviewOptions = {
+  clipPoints?: Point[];
+  insetPx?: number;
+  threshold?: number;
+};
+
+type SourceImageSize = {
+  width: number;
+  height: number;
+};
+
+type SegmentationMask = {
+  data: Float32Array | Uint8Array;
+  width: number;
+  height: number;
+};
+
+type PreviewColor = {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+};
+
+const POINT_SEGMENTATION_PREVIEW_COLOR: PreviewColor = {
+  r: 56,
+  g: 189,
+  b: 248,
+  a: 94,
+};
+
+let interactiveSegmenterPromise: Promise<InteractiveSegmenterTask> | null = null;
 
 export function getManualCutoutBounds(
   image: ImageBounds,
@@ -63,33 +106,107 @@ export async function createManualCutout(
   );
 }
 
-export async function createColorRefinedManualCutout(
+export async function createConstrainedSegmentedManualCutout(
   sourcePhoto: UploadedPhoto,
   points: Point[],
   optionsOrProgress?:
-    | ColorManualCutoutOptions
+    | SegmentedManualCutoutOptions
     | ((progress: BackgroundRemovalProgress) => void),
 ): Promise<UploadedPhoto> {
   const options =
     typeof optionsOrProgress === "function"
       ? { onProgress: optionsOrProgress }
       : (optionsOrProgress ?? {});
-  const maskPoints = getInsetPolygonPoints(points, options.insetPx ?? 0);
+  const candidate = await createManualCutoutCandidate(sourcePhoto, points, {
+    insetPx: options.insetPx,
+  });
+  const roughBlob = await canvasToBlob(candidate.canvas);
+  const segmentedBlob = await removeImageBackground(roughBlob, options.onProgress);
+  const segmentedCanvas = await imageDataUrlToCanvas(await blobToDataUrl(segmentedBlob));
+
+  applyConstrainedSegmentationToCanvas(
+    candidate.canvas,
+    segmentedCanvas,
+    options.refineBandPx ?? 48,
+  );
+
+  return buildConstrainedSegmentedManualCutoutPhoto(
+    sourcePhoto,
+    candidate.canvas.toDataURL("image/png"),
+    candidate.bounds,
+  );
+}
+
+export async function createPointSegmentedManualCutout(
+  sourcePhoto: UploadedPhoto,
+  points: Point[],
+  targetPoint: Point,
+  optionsOrProgress?:
+    | PointSegmentedManualCutoutOptions
+    | ((progress: BackgroundRemovalProgress) => void),
+): Promise<UploadedPhoto> {
+  const options =
+    typeof optionsOrProgress === "function"
+      ? { onProgress: optionsOrProgress }
+      : (optionsOrProgress ?? {});
   const candidate = await createManualCutoutCandidate(sourcePhoto, points, {
     insetPx: options.insetPx,
   });
 
-  await removeExteriorBodyColor(
-    sourcePhoto,
-    maskPoints,
-    candidate.canvas,
-  );
-  options.onProgress?.({ key: "color-refine", current: 1, total: 1 });
+  options.onProgress?.({ key: "interactive-segmenter", current: 0, total: 1 });
+  const mask = await segmentSourcePhotoFromPoint(sourcePhoto, targetPoint);
+  options.onProgress?.({ key: "interactive-segmenter", current: 1, total: 1 });
 
-  return buildColorRefinedManualCutoutPhoto(
+  applyPointSegmentationMaskToCanvas(
+    candidate.canvas,
+    candidate.bounds,
+    sourcePhoto,
+    mask,
+    options.threshold ?? 0.5,
+    options.edgeFringePx ?? 12,
+  );
+
+  return buildPointSegmentedManualCutoutPhoto(
     sourcePhoto,
     candidate.canvas.toDataURL("image/png"),
     candidate.bounds,
+  );
+}
+
+export async function createPointSegmentationPreview(
+  sourcePhoto: UploadedPhoto,
+  targetPoint: Point,
+  options: PointSegmentationPreviewOptions = {},
+): Promise<UploadedPhoto> {
+  const mask = await segmentSourcePhotoFromPoint(sourcePhoto, targetPoint);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(sourcePhoto.width);
+  canvas.height = Math.round(sourcePhoto.height);
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas cutout is not available in this browser.");
+  }
+
+  const imageData = context.createImageData(canvas.width, canvas.height);
+  const clipPoints = options.clipPoints
+    ? getInsetPolygonPoints(options.clipPoints, options.insetPx ?? 0)
+    : undefined;
+  applyPointSegmentationPreviewPixels(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    sourcePhoto,
+    mask,
+    options.threshold ?? 0.5,
+    undefined,
+    clipPoints,
+  );
+  context.putImageData(imageData, 0, 0);
+
+  return buildPointSegmentationPreviewPhoto(
+    sourcePhoto,
+    canvas.toDataURL("image/png"),
   );
 }
 
@@ -138,16 +255,41 @@ export function buildManualCutoutPhoto(
   };
 }
 
-export function buildColorRefinedManualCutoutPhoto(
+export function buildConstrainedSegmentedManualCutoutPhoto(
   sourcePhoto: Pick<UploadedPhoto, "dataUrl" | "name">,
   transparentDataUrl: string,
   bounds: ManualCutoutBounds,
 ): UploadedPhoto {
   return {
     dataUrl: transparentDataUrl,
-    name: `${stripImageExtension(sourcePhoto.name)}-color-refined-cutout.png`,
+    name: `${stripImageExtension(sourcePhoto.name)}-constrained-segmented-cutout.png`,
     width: Math.round(bounds.width),
     height: Math.round(bounds.height),
+  };
+}
+
+export function buildPointSegmentedManualCutoutPhoto(
+  sourcePhoto: Pick<UploadedPhoto, "dataUrl" | "name">,
+  transparentDataUrl: string,
+  bounds: ManualCutoutBounds,
+): UploadedPhoto {
+  return {
+    dataUrl: transparentDataUrl,
+    name: `${stripImageExtension(sourcePhoto.name)}-point-segmented-cutout.png`,
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+}
+
+export function buildPointSegmentationPreviewPhoto(
+  sourcePhoto: Pick<UploadedPhoto, "dataUrl" | "name" | "width" | "height">,
+  transparentDataUrl: string,
+): UploadedPhoto {
+  return {
+    dataUrl: transparentDataUrl,
+    name: `${stripImageExtension(sourcePhoto.name)}-point-segmentation-preview.png`,
+    width: Math.round(sourcePhoto.width),
+    height: Math.round(sourcePhoto.height),
   };
 }
 
@@ -198,140 +340,179 @@ export function getManualCutoutMaskPoints(
   }));
 }
 
-async function removeExteriorBodyColor(
-  sourcePhoto: UploadedPhoto,
-  maskPoints: Point[],
-  cutoutCanvas: HTMLCanvasElement,
-) {
-  const image = await loadImage(sourcePhoto.dataUrl);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(sourcePhoto.width);
-  canvas.height = Math.round(sourcePhoto.height);
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("Canvas cutout is not available in this browser.");
-  }
-
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  const sourceImageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const bodyColor = getDominantExteriorRingColor(
-    sourceImageData.data,
-    canvas.width,
-    canvas.height,
-    maskPoints,
-  );
-
-  if (!bodyColor) return;
-
-  const cutoutContext = cutoutCanvas.getContext("2d");
-  if (!cutoutContext) {
-    throw new Error("Canvas cutout is not available in this browser.");
-  }
-
-  const cutoutImageData = cutoutContext.getImageData(
-    0,
-    0,
-    cutoutCanvas.width,
-    cutoutCanvas.height,
-  );
-  removeConnectedSimilarColorPixels(
-    cutoutImageData.data,
-    cutoutCanvas.width,
-    cutoutCanvas.height,
-    bodyColor,
-  );
-  cutoutContext.putImageData(cutoutImageData, 0, 0);
-}
-
-export function getDominantExteriorRingColor(
-  data: Uint8ClampedArray,
+export function applyConstrainedSegmentationAlpha(
+  manualData: Uint8ClampedArray,
+  segmentedData: Uint8ClampedArray,
   width: number,
   height: number,
-  polygon: Point[],
-  ringPx = 10,
-): RgbColor | null {
-  const buckets = new Map<
-    string,
-    { count: number; r: number; g: number; b: number; saturation: number }
-  >();
-  const bounds = getPolygonBounds(polygon, width, height, ringPx);
+  options: { refineBandPx?: number } = {},
+) {
+  const refineBandPx = options.refineBandPx ?? 48;
+  const distances = getAlphaDistanceFromExterior(manualData, width, height);
 
-  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
-    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
-      const point = { x: x + 0.5, y: y + 0.5 };
-      if (isPointInPolygon(point, polygon)) continue;
-      if (getDistanceToPolygon(point, polygon) > ringPx) continue;
+  for (let pixelIndex = 0; pixelIndex < width * height; pixelIndex += 1) {
+    const alphaIndex = pixelIndex * 4 + 3;
+    if (manualData[alphaIndex] < 16) continue;
+    if (distances[pixelIndex] > refineBandPx) continue;
 
-      const index = (y * width + x) * 4;
-      const alpha = data[index + 3];
-      if (alpha < 180) continue;
+    manualData[alphaIndex] = Math.min(
+      manualData[alphaIndex],
+      segmentedData[alphaIndex],
+    );
+  }
+}
 
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-      const key = getColorBucketKey(r, g, b);
-      const bucket =
-        buckets.get(key) ?? { count: 0, r: 0, g: 0, b: 0, saturation: 0 };
-      bucket.count += 1;
-      bucket.r += r;
-      bucket.g += g;
-      bucket.b += b;
-      bucket.saturation += getColorSaturation({ r, g, b });
-      buckets.set(key, bucket);
+export function applyPointSegmentationMaskToManualCutout(
+  manualData: Uint8ClampedArray,
+  cutoutWidth: number,
+  cutoutHeight: number,
+  bounds: ManualCutoutBounds,
+  sourceSize: SourceImageSize,
+  mask: SegmentationMask,
+  threshold = 0.5,
+) {
+  for (let y = 0; y < cutoutHeight; y += 1) {
+    for (let x = 0; x < cutoutWidth; x += 1) {
+      const manualIndex = (y * cutoutWidth + x) * 4;
+      if (manualData[manualIndex + 3] < 16) continue;
+
+      const sourceX = bounds.x + x;
+      const sourceY = bounds.y + y;
+      const maskX = clamp(
+        Math.floor((sourceX / sourceSize.width) * mask.width),
+        0,
+        mask.width - 1,
+      );
+      const maskY = clamp(
+        Math.floor((sourceY / sourceSize.height) * mask.height),
+        0,
+        mask.height - 1,
+      );
+      const maskValue = mask.data[maskY * mask.width + maskX];
+
+      if (maskValue < threshold) {
+        manualData[manualIndex + 3] = 0;
+      }
+    }
+  }
+}
+
+export function selectPointSegmentationMask(
+  masks: SegmentationMask[],
+  targetPoint: Point,
+  sourceSize: SourceImageSize,
+) {
+  if (masks.length === 0) return null;
+
+  let selectedMask = masks[0];
+  let selectedScore = getMaskValueAtSourcePoint(
+    selectedMask,
+    targetPoint,
+    sourceSize,
+  );
+
+  for (const mask of masks.slice(1)) {
+    const score = getMaskValueAtSourcePoint(mask, targetPoint, sourceSize);
+    if (score > selectedScore) {
+      selectedMask = mask;
+      selectedScore = score;
     }
   }
 
-  const bucketValues = [...buckets.values()];
-  const saturatedBuckets = bucketValues.filter(
-    (bucket) => bucket.saturation / bucket.count >= 25,
-  );
-  const best = (saturatedBuckets.length > 0 ? saturatedBuckets : bucketValues)
-    .sort((a, b) => b.count - a.count)[0];
-  if (!best) return null;
-
-  return {
-    r: Math.round(best.r / best.count),
-    g: Math.round(best.g / best.count),
-    b: Math.round(best.b / best.count),
-  };
+  return selectedMask;
 }
 
-export function removeConnectedSimilarColorPixels(
+export function applyPointSegmentationPreviewPixels(
+  previewData: Uint8ClampedArray,
+  previewWidth: number,
+  previewHeight: number,
+  sourceSize: SourceImageSize,
+  mask: SegmentationMask,
+  threshold = 0.5,
+  color: PreviewColor | undefined = POINT_SEGMENTATION_PREVIEW_COLOR,
+  clipPolygon?: Point[],
+) {
+  const previewColor = color ?? POINT_SEGMENTATION_PREVIEW_COLOR;
+
+  for (let y = 0; y < previewHeight; y += 1) {
+    for (let x = 0; x < previewWidth; x += 1) {
+      const sourceX = ((x + 0.5) / previewWidth) * sourceSize.width;
+      const sourceY = ((y + 0.5) / previewHeight) * sourceSize.height;
+      if (
+        clipPolygon &&
+        !isPointInPolygon({ x: sourceX, y: sourceY }, clipPolygon)
+      ) {
+        continue;
+      }
+
+      const maskValue = getMaskValueAtSourcePoint(
+        mask,
+        { x: sourceX, y: sourceY },
+        sourceSize,
+      );
+
+      if (maskValue < threshold) continue;
+
+      const previewIndex = (y * previewWidth + x) * 4;
+      previewData[previewIndex] = previewColor.r;
+      previewData[previewIndex + 1] = previewColor.g;
+      previewData[previewIndex + 2] = previewColor.b;
+      previewData[previewIndex + 3] = previewColor.a;
+    }
+  }
+}
+
+export function removeNeutralEdgeFringePixels(
   data: Uint8ClampedArray,
   width: number,
   height: number,
-  targetColor: RgbColor,
-  threshold = 64,
+  options: {
+    maxDistancePx?: number;
+    minAlpha?: number;
+    minBrightness?: number;
+    maxSaturation?: number;
+  } = {},
 ) {
-  const queue: number[] = [];
+  const maxDistancePx = options.maxDistancePx ?? 12;
+  const minAlpha = options.minAlpha ?? 16;
   const visited = new Uint8Array(width * height);
-  let removed = 0;
+  const queue: Array<{ pixelIndex: number; distance: number }> = [];
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const pixelIndex = y * width + x;
-      if (!touchesTransparentOrCanvasEdge(data, width, height, x, y)) continue;
-      if (!isSimilarOpaquePixel(data, pixelIndex, targetColor, threshold)) continue;
+      if (!isNeutralFringePixel(data, pixelIndex, options)) continue;
+      if (!touchesTransparentOrCanvasEdge(data, width, height, x, y, minAlpha)) {
+        continue;
+      }
 
       visited[pixelIndex] = 1;
-      queue.push(pixelIndex);
+      queue.push({ pixelIndex, distance: 0 });
     }
   }
 
-  while (queue.length > 0) {
-    const pixelIndex = queue.shift()!;
+  let removed = 0;
+  let readIndex = 0;
+
+  while (readIndex < queue.length) {
+    const { pixelIndex, distance } = queue[readIndex];
+    readIndex += 1;
+
+    if (data[pixelIndex * 4 + 3] >= minAlpha) {
+      data[pixelIndex * 4 + 3] = 0;
+      removed += 1;
+    }
+
+    if (distance >= maxDistancePx) continue;
+
     const x = pixelIndex % width;
     const y = Math.floor(pixelIndex / width);
-    data[pixelIndex * 4 + 3] = 0;
-    removed += 1;
-
     for (const neighbor of getNeighborIndexes(x, y, width, height)) {
       if (visited[neighbor]) continue;
       visited[neighbor] = 1;
-      if (isSimilarOpaquePixel(data, neighbor, targetColor, threshold)) {
-        queue.push(neighbor);
-      }
+      if (!isNeutralFringePixel(data, neighbor, options)) continue;
+
+      queue.push({ pixelIndex: neighbor, distance: distance + 1 });
     }
   }
 
@@ -353,42 +534,118 @@ function drawPolygonPath(
   context.closePath();
 }
 
-function loadImage(src: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new window.Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Could not load image for cutout."));
-    image.src = src;
-  });
-}
-
-function stripImageExtension(name: string) {
-  return name.replace(/\.(jpe?g|png|webp)$/i, "");
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function round(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function getPolygonBounds(
-  polygon: Point[],
-  width: number,
-  height: number,
-  padding: number,
+function applyConstrainedSegmentationToCanvas(
+  manualCanvas: HTMLCanvasElement,
+  segmentedCanvas: HTMLCanvasElement,
+  refineBandPx: number,
 ) {
-  const xs = polygon.map((point) => point.x);
-  const ys = polygon.map((point) => point.y);
+  const width = manualCanvas.width;
+  const height = manualCanvas.height;
+  const manualContext = manualCanvas.getContext("2d");
+  const segmentedContext = segmentedCanvas.getContext("2d");
 
-  return {
-    minX: Math.floor(clamp(Math.min(...xs) - padding, 0, width - 1)),
-    minY: Math.floor(clamp(Math.min(...ys) - padding, 0, height - 1)),
-    maxX: Math.ceil(clamp(Math.max(...xs) + padding, 0, width - 1)),
-    maxY: Math.ceil(clamp(Math.max(...ys) + padding, 0, height - 1)),
-  };
+  if (!manualContext || !segmentedContext) {
+    throw new Error("Canvas cutout is not available in this browser.");
+  }
+
+  const manualImageData = manualContext.getImageData(0, 0, width, height);
+  const segmentedImageData = segmentedContext.getImageData(0, 0, width, height);
+  applyConstrainedSegmentationAlpha(
+    manualImageData.data,
+    segmentedImageData.data,
+    width,
+    height,
+    { refineBandPx },
+  );
+  manualContext.putImageData(manualImageData, 0, 0);
+}
+
+function applyPointSegmentationMaskToCanvas(
+  canvas: HTMLCanvasElement,
+  bounds: ManualCutoutBounds,
+  sourceSize: SourceImageSize,
+  mask: SegmentationMask,
+  threshold: number,
+  edgeFringePx: number,
+) {
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas cutout is not available in this browser.");
+  }
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  applyPointSegmentationMaskToManualCutout(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    bounds,
+    sourceSize,
+    mask,
+    threshold,
+  );
+  removeNeutralEdgeFringePixels(imageData.data, canvas.width, canvas.height, {
+    maxDistancePx: edgeFringePx,
+  });
+  context.putImageData(imageData, 0, 0);
+}
+
+async function segmentSourcePhotoFromPoint(
+  sourcePhoto: UploadedPhoto,
+  targetPoint: Point,
+): Promise<SegmentationMask> {
+  const [image, segmenter] = await Promise.all([
+    loadImage(sourcePhoto.dataUrl),
+    getInteractiveSegmenter(),
+  ]);
+  const result = segmenter.segment(image, {
+    keypoint: {
+      x: clamp(targetPoint.x / sourcePhoto.width, 0, 1),
+      y: clamp(targetPoint.y / sourcePhoto.height, 0, 1),
+    },
+  });
+  const masks =
+    result.confidenceMasks?.map((mask) => ({
+      data: copyMaskData(mask),
+      width: mask.width,
+      height: mask.height,
+    })) ?? [];
+  const mask = selectPointSegmentationMask(masks, targetPoint, sourcePhoto);
+
+  if (!mask) {
+    result.close();
+    throw new Error("Interactive segmentation did not return a confidence mask.");
+  }
+
+  result.close();
+
+  return mask;
+}
+
+function copyMaskData(mask: MPMask) {
+  if (mask.hasFloat32Array()) {
+    return new Float32Array(mask.getAsFloat32Array());
+  }
+
+  return new Uint8Array(mask.getAsUint8Array());
+}
+
+function getMaskValueAtSourcePoint(
+  mask: SegmentationMask,
+  point: Point,
+  sourceSize: SourceImageSize,
+) {
+  const maskX = clamp(
+    Math.floor((point.x / sourceSize.width) * mask.width),
+    0,
+    mask.width - 1,
+  );
+  const maskY = clamp(
+    Math.floor((point.y / sourceSize.height) * mask.height),
+    0,
+    mask.height - 1,
+  );
+
+  return mask.data[maskY * mask.width + maskX] ?? 0;
 }
 
 function isPointInPolygon(point: Point, polygon: Point[]) {
@@ -415,33 +672,28 @@ function isPointInPolygon(point: Point, polygon: Point[]) {
   return isInside;
 }
 
-function getDistanceToPolygon(point: Point, polygon: Point[]) {
-  return polygon.reduce((closest, current, index) => {
-    const next = polygon[(index + 1) % polygon.length];
-    return Math.min(closest, getDistanceToSegment(point, current, next));
-  }, Number.POSITIVE_INFINITY);
-}
+function isNeutralFringePixel(
+  data: Uint8ClampedArray,
+  pixelIndex: number,
+  options: {
+    minAlpha?: number;
+    minBrightness?: number;
+    maxSaturation?: number;
+  },
+) {
+  const dataIndex = pixelIndex * 4;
+  if (data[dataIndex + 3] < (options.minAlpha ?? 16)) return false;
 
-function getDistanceToSegment(point: Point, start: Point, end: Point) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
+  const r = data[dataIndex];
+  const g = data[dataIndex + 1];
+  const b = data[dataIndex + 2];
+  const brightness = (r + g + b) / 3;
+  const saturation = Math.max(r, g, b) - Math.min(r, g, b);
 
-  if (lengthSquared === 0) {
-    return Math.hypot(point.x - start.x, point.y - start.y);
-  }
-
-  const t = clamp(
-    ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared,
-    0,
-    1,
+  return (
+    brightness >= (options.minBrightness ?? 168) &&
+    saturation <= (options.maxSaturation ?? 38)
   );
-
-  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
-}
-
-function getColorBucketKey(r: number, g: number, b: number) {
-  return `${Math.floor(r / 16)}-${Math.floor(g / 16)}-${Math.floor(b / 16)}`;
 }
 
 function touchesTransparentOrCanvasEdge(
@@ -450,31 +702,122 @@ function touchesTransparentOrCanvasEdge(
   height: number,
   x: number,
   y: number,
+  minAlpha: number,
 ) {
   if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
     return true;
   }
 
   return getNeighborIndexes(x, y, width, height).some(
-    (neighbor) => data[neighbor * 4 + 3] < 16,
+    (neighbor) => data[neighbor * 4 + 3] < minAlpha,
   );
 }
 
-function isSimilarOpaquePixel(
-  data: Uint8ClampedArray,
-  pixelIndex: number,
-  targetColor: RgbColor,
-  threshold: number,
-) {
-  const dataIndex = pixelIndex * 4;
-  if (data[dataIndex + 3] < 180) return false;
+async function getInteractiveSegmenter() {
+  if (!interactiveSegmenterPromise) {
+    interactiveSegmenterPromise = createInteractiveSegmenter();
+  }
 
-  return (
-    getColorDistance(
-      { r: data[dataIndex], g: data[dataIndex + 1], b: data[dataIndex + 2] },
-      targetColor,
-    ) <= threshold
+  return interactiveSegmenterPromise;
+}
+
+async function createInteractiveSegmenter() {
+  const { FilesetResolver, InteractiveSegmenter } = await import(
+    "@mediapipe/tasks-vision"
   );
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm",
+  );
+
+  return InteractiveSegmenter.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-tasks/interactive_segmenter/ptm_512_hdt_ptm_woid.tflite",
+    },
+    outputCategoryMask: false,
+    outputConfidenceMasks: true,
+  });
+}
+
+async function imageDataUrlToCanvas(dataUrl: string) {
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas cutout is not available in this browser.");
+  }
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function getAlphaDistanceFromExterior(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+) {
+  const distances = new Int16Array(width * height);
+  distances.fill(32767);
+  const queue: number[] = [];
+
+  for (let pixelIndex = 0; pixelIndex < width * height; pixelIndex += 1) {
+    if (data[pixelIndex * 4 + 3] >= 16) continue;
+
+    distances[pixelIndex] = 0;
+    queue.push(pixelIndex);
+  }
+
+  while (queue.length > 0) {
+    const pixelIndex = queue.shift()!;
+    const nextDistance = distances[pixelIndex] + 1;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+
+    for (const neighbor of getNeighborIndexes(x, y, width, height)) {
+      if (nextDistance >= distances[neighbor]) continue;
+
+      distances[neighbor] = nextDistance;
+      queue.push(neighbor);
+    }
+  }
+
+  return distances;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("Could not encode manual cutout for segmentation."));
+      }
+    }, "image/png");
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load image for cutout."));
+    image.src = src;
+  });
+}
+
+function stripImageExtension(name: string) {
+  return name.replace(/\.(jpe?g|png|webp)$/i, "");
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function round(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function getNeighborIndexes(
@@ -491,12 +834,4 @@ function getNeighborIndexes(
   if (y < height - 1) neighbors.push((y + 1) * width + x);
 
   return neighbors;
-}
-
-function getColorDistance(left: RgbColor, right: RgbColor) {
-  return Math.hypot(left.r - right.r, left.g - right.g, left.b - right.b);
-}
-
-function getColorSaturation(color: RgbColor) {
-  return Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b);
 }

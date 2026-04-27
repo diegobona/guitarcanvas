@@ -4,6 +4,7 @@ import {
   Check,
   ImageUp,
   LoaderCircle,
+  LocateFixed,
   RefreshCw,
   Scissors,
   Trash2,
@@ -35,6 +36,8 @@ type CutoutState = {
   progress: number;
 };
 
+type ManualMode = "outline" | "target";
+
 export function UploadPanel({
   title,
   emptyLabel,
@@ -45,6 +48,7 @@ export function UploadPanel({
   onPhotoLoaded,
 }: UploadPanelProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const previewRequestRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [cutout, setCutout] = useState<CutoutState>({
     status: "idle",
@@ -53,6 +57,11 @@ export function UploadPanel({
   const [sourcePhoto, setSourcePhoto] = useState<UploadedPhoto | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualPoints, setManualPoints] = useState<Point[]>([]);
+  const [manualMode, setManualMode] = useState<ManualMode>("outline");
+  const [manualTargetPoint, setManualTargetPoint] = useState<Point | null>(null);
+  const [manualSegmentPreview, setManualSegmentPreview] =
+    useState<UploadedPhoto | null>(null);
+  const [manualPreviewLoading, setManualPreviewLoading] = useState(false);
   const [manualInset, setManualInset] = useState(4);
   const [manualApplying, setManualApplying] = useState(false);
 
@@ -61,6 +70,11 @@ export function UploadPanel({
     setCutout({ status: "idle", progress: 0 });
     setManualOpen(false);
     setManualPoints([]);
+    setManualMode("outline");
+    setManualTargetPoint(null);
+    setManualSegmentPreview(null);
+    setManualPreviewLoading(false);
+    previewRequestRef.current += 1;
     setSourcePhoto(null);
 
     if (!file) return;
@@ -130,19 +144,20 @@ export function UploadPanel({
     }
   }
 
-  async function handleApplyColorManualCutout() {
-    if (!sourcePhoto || manualPoints.length < 3) return;
+  async function handleApplyPointSegmentedManualCutout() {
+    if (!sourcePhoto || manualPoints.length < 3 || !manualTargetPoint) return;
 
     setError(null);
     setManualApplying(true);
     setCutout({ status: "removing", progress: 0 });
     try {
-      const { createColorRefinedManualCutout } = await import(
+      const { createPointSegmentedManualCutout } = await import(
         "@/lib/pickguard/manualCutout"
       );
-      const manualPhoto = await createColorRefinedManualCutout(
+      const manualPhoto = await createPointSegmentedManualCutout(
         sourcePhoto,
         manualPoints,
+        manualTargetPoint,
         {
           insetPx: manualInset,
           onProgress: handleCutoutProgress,
@@ -153,9 +168,43 @@ export function UploadPanel({
       setManualOpen(false);
     } catch {
       setCutout({ status: "error", progress: 0 });
-      setError("Color cleanup failed. Try clean outline with edge trim.");
+      setError("Point segmentation failed. Pick a clearer point on the pickguard.");
     } finally {
       setManualApplying(false);
+    }
+  }
+
+  async function handleTargetPointChange(point: Point) {
+    setManualTargetPoint(point);
+    setManualSegmentPreview(null);
+
+    if (!sourcePhoto) return;
+
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
+    setManualPreviewLoading(true);
+    setError(null);
+
+    try {
+      const { createPointSegmentationPreview } = await import(
+        "@/lib/pickguard/manualCutout"
+      );
+      const preview = await createPointSegmentationPreview(sourcePhoto, point, {
+        clipPoints: manualPoints,
+        insetPx: manualInset,
+      });
+
+      if (previewRequestRef.current === requestId) {
+        setManualSegmentPreview(preview);
+      }
+    } catch {
+      if (previewRequestRef.current === requestId) {
+        setError("Point preview failed. Pick another clear point on the pickguard.");
+      }
+    } finally {
+      if (previewRequestRef.current === requestId) {
+        setManualPreviewLoading(false);
+      }
     }
   }
 
@@ -200,18 +249,39 @@ export function UploadPanel({
         <ManualCutoutEditor
           applying={manualApplying}
           insetPx={manualInset}
+          mode={manualMode}
           photo={sourcePhoto}
           points={manualPoints}
+          previewLoading={manualPreviewLoading}
+          segmentPreview={manualSegmentPreview}
+          targetPoint={manualTargetPoint}
           onApply={handleApplyManualCutout}
-          onApplyColor={handleApplyColorManualCutout}
-          onClear={() => setManualPoints([])}
+          onApplySegment={handleApplyPointSegmentedManualCutout}
+          onClear={() => {
+            setManualPoints([]);
+            setManualTargetPoint(null);
+            setManualSegmentPreview(null);
+            setManualPreviewLoading(false);
+            previewRequestRef.current += 1;
+            setManualMode("outline");
+          }}
           onInsetChange={setManualInset}
-          onPointAdd={(point) =>
-            setManualPoints((currentPoints) => [...currentPoints, point])
-          }
-          onUndo={() =>
-            setManualPoints((currentPoints) => currentPoints.slice(0, -1))
-          }
+          onPointAdd={(point) => {
+            setManualTargetPoint(null);
+            setManualSegmentPreview(null);
+            setManualPreviewLoading(false);
+            previewRequestRef.current += 1;
+            setManualPoints((currentPoints) => [...currentPoints, point]);
+          }}
+          onModeChange={setManualMode}
+          onTargetPointChange={(point) => void handleTargetPointChange(point)}
+          onUndo={() => {
+            setManualTargetPoint(null);
+            setManualSegmentPreview(null);
+            setManualPreviewLoading(false);
+            previewRequestRef.current += 1;
+            setManualPoints((currentPoints) => currentPoints.slice(0, -1));
+          }}
         />
       ) : null}
       {photo ? (
@@ -272,26 +342,38 @@ function CutoutStatus({ state }: { state: CutoutState }) {
 type ManualCutoutEditorProps = {
   applying: boolean;
   insetPx: number;
+  mode: ManualMode;
   photo: UploadedPhoto;
   points: Point[];
+  previewLoading: boolean;
+  segmentPreview: UploadedPhoto | null;
+  targetPoint: Point | null;
   onApply: () => void;
-  onApplyColor: () => void;
+  onApplySegment: () => void;
   onClear: () => void;
   onInsetChange: (insetPx: number) => void;
+  onModeChange: (mode: ManualMode) => void;
   onPointAdd: (point: Point) => void;
+  onTargetPointChange: (point: Point) => void;
   onUndo: () => void;
 };
 
 function ManualCutoutEditor({
   applying,
   insetPx,
+  mode,
   photo,
   points,
+  previewLoading,
+  segmentPreview,
+  targetPoint,
   onApply,
-  onApplyColor,
+  onApplySegment,
   onClear,
   onInsetChange,
+  onModeChange,
   onPointAdd,
+  onTargetPointChange,
   onUndo,
 }: ManualCutoutEditorProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -301,10 +383,17 @@ function ManualCutoutEditor({
     if (!frame) return;
 
     const rect = frame.getBoundingClientRect();
-    onPointAdd({
+    const point = {
       x: clamp(((event.clientX - rect.left) / rect.width) * photo.width, 0, photo.width),
       y: clamp(((event.clientY - rect.top) / rect.height) * photo.height, 0, photo.height),
-    });
+    };
+
+    if (mode === "target") {
+      onTargetPointChange(point);
+      return;
+    }
+
+    onPointAdd(point);
   }
 
   const svgPoints = points
@@ -323,6 +412,19 @@ function ManualCutoutEditor({
         onPointerDown={handlePointerDown}
       >
         <img alt="Original pickguard source" draggable={false} src={photo.dataUrl} />
+        {segmentPreview ? (
+          <img
+            alt=""
+            className="manual-segment-preview"
+            draggable={false}
+            src={segmentPreview.dataUrl}
+          />
+        ) : null}
+        {previewLoading ? (
+          <div className="manual-preview-loading" aria-hidden>
+            <LoaderCircle className="spin-icon" size={18} />
+          </div>
+        ) : null}
         <svg aria-hidden viewBox="0 0 100 100" preserveAspectRatio="none">
           {points.length > 1 ? (
             <polyline className="manual-cutout-line" points={svgPoints} />
@@ -339,6 +441,14 @@ function ManualCutoutEditor({
               r="1.35"
             />
           ))}
+          {targetPoint ? (
+            <circle
+              className="manual-target-point"
+              cx={(targetPoint.x / photo.width) * 100}
+              cy={(targetPoint.y / photo.height) * 100}
+              r="1.9"
+            />
+          ) : null}
         </svg>
       </div>
       <p className="helper-text">
@@ -356,6 +466,26 @@ function ManualCutoutEditor({
           onChange={(event) => onInsetChange(Number(event.target.value))}
         />
       </label>
+      <div className="manual-mode-row">
+        <button
+          className={mode === "outline" ? "primary-button" : "secondary-button"}
+          disabled={applying}
+          type="button"
+          onClick={() => onModeChange("outline")}
+        >
+          <Scissors aria-hidden size={17} />
+          Draw outline
+        </button>
+        <button
+          className={mode === "target" ? "primary-button" : "secondary-button"}
+          disabled={points.length < 3 || applying}
+          type="button"
+          onClick={() => onModeChange("target")}
+        >
+          <LocateFixed aria-hidden size={17} />
+          Pick target
+        </button>
+      </div>
       <div className="manual-cutout-toolbar">
         <button
           className="icon-button"
@@ -389,13 +519,13 @@ function ManualCutoutEditor({
           Apply clean outline
         </button>
         <button
-          className="secondary-button manual-color-button"
-          disabled={points.length < 3 || applying}
+          className="secondary-button manual-segment-button"
+          disabled={points.length < 3 || !targetPoint || applying || previewLoading}
           type="button"
-          onClick={onApplyColor}
+          onClick={onApplySegment}
         >
           <WandSparkles aria-hidden size={17} />
-          Clean body color
+          Segment from point
         </button>
       </div>
     </div>

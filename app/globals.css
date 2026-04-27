@@ -287,6 +287,29 @@ a {
 .manual-cutout-frame svg {
   overflow: visible;
   pointer-events: none;
+  z-index: 2;
+}
+
+.manual-segment-preview {
+  pointer-events: none;
+  z-index: 1;
+}
+
+.manual-preview-loading {
+  align-items: center;
+  background: rgba(12, 13, 16, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: #56cffa;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 34px;
+  z-index: 3;
 }
 
 .manual-cutout-fill {
@@ -308,13 +331,25 @@ a {
   stroke-width: 0.45;
 }
 
+.manual-target-point {
+  fill: #ff5a62;
+  stroke: #fff1cf;
+  stroke-width: 0.6;
+}
+
+.manual-mode-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .manual-cutout-toolbar {
   display: grid;
   gap: 8px;
   grid-template-columns: 42px 42px 1fr;
 }
 
-.manual-color-button {
+.manual-segment-button {
   grid-column: 1 / -1;
 }
 
