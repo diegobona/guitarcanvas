@@ -7,6 +7,7 @@ import { pickguardTemplates } from "../lib/pickguard/templates";
 import { buildCutoutPhoto } from "../lib/pickguard/backgroundRemoval";
 import {
   applyConstrainedSegmentationAlpha,
+  applyDarkTargetConnectedMaskToManualCutout,
   applyPointSegmentationMaskToManualCutout,
   applyPointSegmentationPreviewPixels,
   buildConstrainedSegmentedManualCutoutPhoto,
@@ -16,6 +17,8 @@ import {
   getManualCutoutBounds,
   getManualCutoutMaskPoints,
   getInsetPolygonPoints,
+  getDominantExteriorRingColors,
+  removeEdgeFringePixelsMatchingColors,
   removeNeutralEdgeFringePixels,
   selectPointSegmentationMask,
 } from "../lib/pickguard/manualCutout";
@@ -449,6 +452,120 @@ describe("manual pickguard cutout helpers", () => {
     assert.equal(getPixelAlpha(data, width, 2, 2), 0);
     assert.equal(getPixelAlpha(data, width, 1, 1), 255);
     assert.equal(getPixelAlpha(data, width, 4, 2), 255);
+  });
+
+  it("samples saturated guitar body colors from just outside the selected outline", () => {
+    const width = 6;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 23, g: 23, b: 22, a: 255 });
+    setPixel(data, width, 1, 1, { r: 171, g: 9, b: 18, a: 255 });
+    setPixel(data, width, 1, 2, { r: 178, g: 12, b: 22, a: 255 });
+    setPixel(data, width, 1, 3, { r: 166, g: 8, b: 16, a: 255 });
+
+    const colors = getDominantExteriorRingColors(
+      data,
+      width,
+      height,
+      [
+        { x: 2, y: 1 },
+        { x: 4, y: 1 },
+        { x: 4, y: 3 },
+        { x: 2, y: 3 },
+      ],
+      { ringPx: 1.25 },
+    );
+
+    assert.deepEqual(colors[0], { r: 172, g: 10, b: 19 });
+  });
+
+  it("removes sampled red body fringe while preserving black guard and white ply line", () => {
+    const width = 8;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 0, g: 0, b: 0, a: 0 });
+
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 6; x += 1) {
+        setPixel(data, width, x, y, { r: 24, g: 24, b: 23, a: 255 });
+      }
+    }
+
+    setPixel(data, width, 1, 2, { r: 177, g: 11, b: 22, a: 255 });
+    setPixel(data, width, 2, 2, { r: 164, g: 8, b: 18, a: 255 });
+    setPixel(data, width, 3, 2, { r: 245, g: 246, b: 241, a: 255 });
+    setPixel(data, width, 5, 2, { r: 178, g: 10, b: 19, a: 255 });
+
+    const removed = removeEdgeFringePixelsMatchingColors(
+      data,
+      width,
+      height,
+      [{ r: 172, g: 10, b: 19 }],
+      { threshold: 42, maxDistancePx: 4 },
+    );
+
+    assert.equal(removed, 2);
+    assert.equal(getPixelAlpha(data, width, 1, 2), 0);
+    assert.equal(getPixelAlpha(data, width, 2, 2), 0);
+    assert.equal(getPixelAlpha(data, width, 3, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 4, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 5, 2), 255);
+  });
+
+  it("does not apply sampled color cleanup when it would erase the whole cutout", () => {
+    const width = 5;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 92, g: 105, b: 101, a: 255 });
+
+    const removed = removeEdgeFringePixelsMatchingColors(
+      data,
+      width,
+      height,
+      [{ r: 94, g: 106, b: 102 }],
+      { threshold: 24, maxDistancePx: 10 },
+    );
+
+    assert.equal(removed, 0);
+    assert.equal(getPixelAlpha(data, width, 0, 0), 255);
+    assert.equal(getPixelAlpha(data, width, 2, 2), 255);
+  });
+
+  it("keeps the dark target guard component and drops surrounding red body", () => {
+    const width = 11;
+    const height = 9;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 0, g: 0, b: 0, a: 0 });
+
+    for (let y = 1; y <= 7; y += 1) {
+      for (let x = 1; x <= 9; x += 1) {
+        setPixel(data, width, x, y, { r: 170, g: 8, b: 18, a: 255 });
+      }
+    }
+
+    for (let y = 3; y <= 6; y += 1) {
+      for (let x = 3; x <= 7; x += 1) {
+        setPixel(data, width, x, y, { r: 24, g: 24, b: 23, a: 255 });
+      }
+    }
+
+    for (let x = 3; x <= 7; x += 1) {
+      setPixel(data, width, x, 2, { r: 239, g: 241, b: 236, a: 255 });
+    }
+    setPixel(data, width, 5, 5, { r: 242, g: 240, b: 224, a: 255 });
+
+    const applied = applyDarkTargetConnectedMaskToManualCutout(
+      data,
+      width,
+      height,
+      { x: 5, y: 4 },
+    );
+
+    assert.equal(applied, true);
+    assert.equal(getPixelAlpha(data, width, 1, 1), 0);
+    assert.equal(getPixelAlpha(data, width, 5, 4), 255);
+    assert.equal(getPixelAlpha(data, width, 5, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 5, 5), 255);
   });
 });
 
