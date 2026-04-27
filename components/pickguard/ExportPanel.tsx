@@ -25,7 +25,7 @@ export function ExportPanel({
       <div className="export-grid">
         <button
           className="secondary-button"
-          disabled={disabled || exporting !== null}
+          disabled
           type="button"
           onClick={() => void onExportMockup()}
         >
@@ -34,7 +34,7 @@ export function ExportPanel({
         </button>
         <button
           className="secondary-button"
-          disabled={disabled || exporting !== null}
+          disabled
           type="button"
           onClick={() => void onExportPng()}
         >
@@ -43,7 +43,7 @@ export function ExportPanel({
         </button>
         <button
           className="secondary-button"
-          disabled={disabled || exporting !== null}
+          disabled
           type="button"
           onClick={() => void onExportPdf()}
         >

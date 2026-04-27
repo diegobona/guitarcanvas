@@ -14,6 +14,8 @@ export type PickguardTransform = {
   rotation: number;
 };
 
+export type StickerTransform = PickguardTransform;
+
 export type Point = {
   x: number;
   y: number;
@@ -53,6 +55,25 @@ export function getInitialTransform(photo: PickguardImageBounds) {
     scale: 1,
     rotation: 0,
   };
+}
+
+export function getInitialStickerTransform(photo: PickguardImageBounds) {
+  return {
+    x: photo.width * 0.5,
+    y: photo.height * 0.5,
+    scale: 1,
+    rotation: 0,
+  };
+}
+
+export function getStickerBaseSize(
+  sticker: PickguardImageBounds,
+  photo: PickguardImageBounds,
+) {
+  const width = Math.max(120, Math.min(photo.width * 0.42, 560));
+  const height = width * (sticker.height / sticker.width);
+
+  return { width, height };
 }
 
 export function getInitialStringOverlay(photo: PickguardImageBounds): StringOverlay {

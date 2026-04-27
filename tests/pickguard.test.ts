@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { generateDesigns } from "../lib/pickguard/patternGenerator";
 import { pickguardTemplates } from "../lib/pickguard/templates";
+import { buildCutoutPhoto } from "../lib/pickguard/backgroundRemoval";
 import { buildStringOverlaySvg, buildSvgPackage } from "../lib/pickguard/exporters";
 import {
   clampStringGuidePoint,
@@ -13,7 +14,7 @@ describe("pickguard template data", () => {
   it("ships the three MVP templates with replaceable SVG metadata", () => {
     assert.deepEqual(
       pickguardTemplates.map((template) => template.id),
-      ["strat", "tele", "sg"],
+      ["strat", "tele", "jazzmaster", "jaguar", "sg", "mustang"],
     );
 
     for (const template of pickguardTemplates) {
@@ -96,5 +97,28 @@ describe("string overlay builder", () => {
     assert.match(svg, /data-layer="strings-above-pickguard"/);
     assert.match(svg, /y1="-110"/);
     assert.match(svg, /y2="980"/);
+  });
+});
+
+describe("AI background removal helpers", () => {
+  it("keeps the source dimensions while replacing the image with a transparent PNG", () => {
+    const source = {
+      dataUrl: "data:image/jpeg;base64,old",
+      name: "red-pickguard.jpg",
+      width: 1400,
+      height: 900,
+    };
+
+    const cutout = buildCutoutPhoto(
+      source,
+      "data:image/png;base64,transparent",
+    );
+
+    assert.deepEqual(cutout, {
+      dataUrl: "data:image/png;base64,transparent",
+      name: "red-pickguard-cutout.png",
+      width: 1400,
+      height: 900,
+    });
   });
 });

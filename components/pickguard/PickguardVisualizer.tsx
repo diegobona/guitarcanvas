@@ -1,42 +1,43 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { DesignGenerator } from "./DesignGenerator";
 import { EditorCanvas } from "./EditorCanvas";
 import { ExportPanel } from "./ExportPanel";
-import { TemplateSelector } from "./TemplateSelector";
 import { UploadPanel } from "./UploadPanel";
-import type { GeneratedDesign } from "@/lib/pickguard/patternGenerator";
-import { generateDesigns } from "@/lib/pickguard/patternGenerator";
-import {
-  getTemplateById,
-  type PickguardTemplateId,
-} from "@/lib/pickguard/templates";
-import {
-  exportMockupJpg,
-  exportPrintablePdf,
-  exportSvgPackage,
-  exportTransparentPng,
-} from "@/lib/pickguard/exporters";
+import { getTemplateById } from "@/lib/pickguard/templates";
+import { exportMockupJpg } from "@/lib/pickguard/exporters";
 import {
   getInitialStringOverlay,
+  getInitialStickerTransform,
   getInitialTransform,
   type PickguardTransform,
+  type StickerTransform,
   type StringOverlay,
   type UploadedPhoto,
 } from "@/lib/pickguard/geometry";
-
-const defaultPrompt =
-  "vintage paisley, red and blue floral, abalone shell, black sacred geometry";
+import {
+  generateDesigns,
+  type GeneratedDesign,
+} from "@/lib/pickguard/patternGenerator";
 
 export function PickguardVisualizer() {
   const [photo, setPhoto] = useState<UploadedPhoto | null>(null);
-  const [templateId, setTemplateId] = useState<PickguardTemplateId>("strat");
-  const [prompt, setPrompt] = useState(defaultPrompt);
+  const [pickguardPhoto, setPickguardPhoto] = useState<UploadedPhoto | null>(
+    null,
+  );
+  const [prompt, setPrompt] = useState("");
   const [designs, setDesigns] = useState<GeneratedDesign[]>([]);
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null);
+  const [applyGeneratedDesign, setApplyGeneratedDesign] = useState(false);
   const [transform, setTransform] = useState<PickguardTransform>({
+    x: 420,
+    y: 300,
+    scale: 1,
+    rotation: 0,
+  });
+  const [stickerTransform, setStickerTransform] = useState<StickerTransform>({
     x: 420,
     y: 300,
     scale: 1,
@@ -45,22 +46,31 @@ export function PickguardVisualizer() {
   const [stringOverlay, setStringOverlay] = useState<StringOverlay | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const template = getTemplateById(templateId);
-  const selectedDesign = useMemo(
-    () => designs.find((design) => design.id === selectedDesignId) ?? null,
-    [designs, selectedDesignId],
-  );
+  const template = getTemplateById("strat");
+  const selectedDesign =
+    designs.find((design) => design.id === selectedDesignId) ?? null;
+  const activeDesign =
+    applyGeneratedDesign && pickguardPhoto ? selectedDesign : null;
 
   function handlePhotoLoaded(nextPhoto: UploadedPhoto) {
     setPhoto(nextPhoto);
     setTransform(getInitialTransform(nextPhoto));
+    setStickerTransform(getInitialStickerTransform(nextPhoto));
     setStringOverlay(getInitialStringOverlay(nextPhoto));
   }
 
-  function handleGenerate() {
+  function handlePickguardPhotoLoaded(nextPhoto: UploadedPhoto) {
+    setPickguardPhoto(nextPhoto);
+    if (photo) {
+      setStickerTransform(getInitialStickerTransform(photo));
+    }
+  }
+
+  function handleGenerateDesigns() {
     const nextDesigns = generateDesigns(prompt);
     setDesigns(nextDesigns);
     setSelectedDesignId(nextDesigns[0]?.id ?? null);
+    setApplyGeneratedDesign(true);
   }
 
   async function runExport(
@@ -75,7 +85,7 @@ export function PickguardVisualizer() {
     }
   }
 
-  const canExport = Boolean(photo && selectedDesign);
+  const canExport = Boolean(photo && pickguardPhoto);
 
   return (
     <main className="visualizer-page">
@@ -94,16 +104,30 @@ export function PickguardVisualizer() {
 
       <section className="visualizer-grid" aria-label="Pickguard visualizer">
         <div className="control-stack">
-          <UploadPanel photo={photo} onPhotoLoaded={handlePhotoLoaded} />
-          <TemplateSelector
-            selectedTemplateId={templateId}
-            onSelectTemplate={setTemplateId}
+          <UploadPanel
+            emptyLabel="Upload guitar photo"
+            errorLabel="Please upload a JPG or PNG guitar photo."
+            photo={photo}
+            replaceLabel="Replace guitar photo"
+            title="1. Guitar photo"
+            onPhotoLoaded={handlePhotoLoaded}
+          />
+          <UploadPanel
+            emptyLabel="Upload pickguard photo"
+            errorLabel="Please upload a JPG or PNG pickguard photo."
+            photo={pickguardPhoto}
+            replaceLabel="Replace pickguard photo"
+            removeBackground
+            title="2. Pickguard photo"
+            onPhotoLoaded={handlePickguardPhotoLoaded}
           />
           <DesignGenerator
+            applyDesign={applyGeneratedDesign}
             designs={designs}
             prompt={prompt}
             selectedDesignId={selectedDesignId}
-            onGenerate={handleGenerate}
+            onApplyDesignChange={setApplyGeneratedDesign}
+            onGenerate={handleGenerateDesigns}
             onPromptChange={setPrompt}
             onSelectDesign={setSelectedDesignId}
           />
@@ -111,45 +135,34 @@ export function PickguardVisualizer() {
             disabled={!canExport}
             exporting={exporting}
             onExportMockup={() => {
-              if (!photo || !selectedDesign) return Promise.resolve();
+              if (!photo || !pickguardPhoto) return Promise.resolve();
               return runExport("mockup", () =>
                 exportMockupJpg({
                   photo,
                   template,
-                  design: selectedDesign,
-                  transform,
+                  pickguardPhoto,
+                  stickerTransform,
+                  overlayDesign: activeDesign ?? undefined,
                   stringOverlay: stringOverlay ?? undefined,
                 }),
               );
             }}
-            onExportPdf={() => {
-              if (!selectedDesign) return Promise.resolve();
-              return runExport("pdf", () =>
-                exportPrintablePdf({ template, design: selectedDesign }),
-              );
-            }}
-            onExportPng={() => {
-              if (!selectedDesign) return Promise.resolve();
-              return runExport("png", () =>
-                exportTransparentPng({ template, design: selectedDesign }),
-              );
-            }}
-            onExportSvg={() => {
-              if (!selectedDesign) return Promise.resolve();
-              return runExport("svg", () =>
-                exportSvgPackage({ template, design: selectedDesign }),
-              );
-            }}
+            onExportPdf={() => Promise.resolve()}
+            onExportPng={() => Promise.resolve()}
+            onExportSvg={() => Promise.resolve()}
           />
         </div>
 
         <EditorCanvas
-          design={selectedDesign}
+          design={activeDesign}
           photo={photo}
+          pickguardPhoto={pickguardPhoto}
           template={template}
           transform={transform}
+          stickerTransform={stickerTransform}
           stringOverlay={stringOverlay}
           onTransformChange={setTransform}
+          onStickerTransformChange={setStickerTransform}
           onStringOverlayChange={setStringOverlay}
         />
       </section>

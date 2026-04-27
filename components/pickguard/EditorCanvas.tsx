@@ -12,10 +12,12 @@ import {
 import {
   clampStringGuidePoint,
   getInitialStringOverlay,
-  getInitialTransform,
   getPickguardBaseSize,
+  getInitialStickerTransform,
+  getStickerBaseSize,
   type Point,
   type PickguardTransform,
+  type StickerTransform,
   type StringOverlay,
   type UploadedPhoto,
 } from "@/lib/pickguard/geometry";
@@ -24,11 +26,14 @@ import { parseViewBox, type PickguardTemplate } from "@/lib/pickguard/templates"
 
 type EditorCanvasProps = {
   photo: UploadedPhoto | null;
+  pickguardPhoto: UploadedPhoto | null;
   template: PickguardTemplate;
   design: GeneratedDesign | null;
   transform: PickguardTransform;
+  stickerTransform: StickerTransform;
   stringOverlay: StringOverlay | null;
   onTransformChange: (transform: PickguardTransform) => void;
+  onStickerTransformChange: (transform: StickerTransform) => void;
   onStringOverlayChange: (overlay: StringOverlay) => void;
 };
 
@@ -46,11 +51,14 @@ type StringDragState = {
 
 export function EditorCanvas({
   photo,
+  pickguardPhoto,
   template,
   design,
   transform,
+  stickerTransform,
   stringOverlay,
   onTransformChange,
+  onStickerTransformChange,
   onStringOverlayChange,
 }: EditorCanvasProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +83,13 @@ export function EditorCanvas({
   const base = useMemo(
     () => (photo ? getPickguardBaseSize(template, photo) : null),
     [photo, template],
+  );
+  const stickerBase = useMemo(
+    () =>
+      photo && pickguardPhoto
+        ? getStickerBaseSize(pickguardPhoto, photo)
+        : null,
+    [photo, pickguardPhoto],
   );
   const viewBox = parseViewBox(template.viewBox);
   const clipId = `editor-clip-${template.id}`;
@@ -108,6 +123,17 @@ export function EditorCanvas({
     };
   }
 
+  function handleStickerPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!photo) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startTransform: stickerTransform,
+    };
+  }
+
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!photo || !drag || drag.pointerId !== event.pointerId) return;
@@ -115,6 +141,19 @@ export function EditorCanvas({
     const dx = (event.clientX - drag.startClientX) / ratio;
     const dy = (event.clientY - drag.startClientY) / ratio;
     onTransformChange({
+      ...drag.startTransform,
+      x: drag.startTransform.x + dx,
+      y: drag.startTransform.y + dy,
+    });
+  }
+
+  function handleStickerPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!photo || !drag || drag.pointerId !== event.pointerId) return;
+
+    const dx = (event.clientX - drag.startClientX) / ratio;
+    const dy = (event.clientY - drag.startClientY) / ratio;
+    onStickerTransformChange({
       ...drag.startTransform,
       x: drag.startTransform.x + dx,
       y: drag.startTransform.y + dy,
@@ -191,7 +230,43 @@ export function EditorCanvas({
               draggable={false}
               src={photo.dataUrl}
             />
-            {design && base ? (
+            {pickguardPhoto && stickerBase ? (
+              <div
+                className="pickguard-photo-overlay"
+                role="button"
+                tabIndex={0}
+                style={{
+                  left: stickerTransform.x * ratio,
+                  top: stickerTransform.y * ratio,
+                  width: stickerBase.width * ratio,
+                  height: stickerBase.height * ratio,
+                  transform: `translate(-50%, -50%) rotate(${stickerTransform.rotation}deg) scale(${stickerTransform.scale})`,
+                }}
+                onPointerCancel={stopDrag}
+                onPointerDown={handleStickerPointerDown}
+                onPointerMove={handleStickerPointerMove}
+                onPointerUp={stopDrag}
+              >
+                <img
+                  alt="Uploaded pickguard"
+                  draggable={false}
+                  src={pickguardPhoto.dataUrl}
+                />
+                {design ? (
+                  <img
+                    alt=""
+                    className="pickguard-pattern-fill"
+                    draggable={false}
+                    src={design.imageDataUrl}
+                  />
+                ) : null}
+                <span className="transform-handle handle-nw" />
+                <span className="transform-handle handle-ne" />
+                <span className="transform-handle handle-sw" />
+                <span className="transform-handle handle-se" />
+              </div>
+            ) : null}
+            {design && base && !pickguardPhoto ? (
               <div
                 className="pickguard-overlay"
                 role="button"
@@ -247,7 +322,7 @@ export function EditorCanvas({
                 <span className="transform-handle handle-se" />
               </div>
             ) : null}
-            {design && stringOverlay?.enabled ? (
+            {pickguardPhoto && stringOverlay?.enabled ? (
               <StringOverlayLayer
                 overlay={stringOverlay}
                 ratio={ratio}
@@ -272,15 +347,15 @@ export function EditorCanvas({
         <label className="field">
           <span>Scale</span>
           <input
-            disabled={!photo}
+            disabled={!photo || !pickguardPhoto}
             max="2.5"
             min="0.35"
             step="0.01"
             type="range"
-            value={transform.scale}
+            value={pickguardPhoto ? stickerTransform.scale : transform.scale}
             onChange={(event) =>
-              onTransformChange({
-                ...transform,
+              onStickerTransformChange({
+                ...stickerTransform,
                 scale: Number(event.target.value),
               })
             }
@@ -289,15 +364,15 @@ export function EditorCanvas({
         <label className="field">
           <span>Rotate</span>
           <input
-            disabled={!photo}
+            disabled={!photo || !pickguardPhoto}
             max="180"
             min="-180"
             step="1"
             type="range"
-            value={transform.rotation}
+            value={pickguardPhoto ? stickerTransform.rotation : transform.rotation}
             onChange={(event) =>
-              onTransformChange({
-                ...transform,
+              onStickerTransformChange({
+                ...stickerTransform,
                 rotation: Number(event.target.value),
               })
             }
@@ -305,16 +380,18 @@ export function EditorCanvas({
         </label>
         <button
           className="secondary-button"
-          disabled={!photo}
+          disabled={!photo || !pickguardPhoto}
           type="button"
-          onClick={() => photo && onTransformChange(getInitialTransform(photo))}
+          onClick={() =>
+            photo && onStickerTransformChange(getInitialStickerTransform(photo))
+          }
         >
           <RotateCcw aria-hidden size={17} />
           Reset
         </button>
       </div>
 
-      {photo && design && stringOverlay ? (
+      {photo && pickguardPhoto && stringOverlay ? (
         <div className="string-controls">
           <label className="field checkbox-field">
             <input

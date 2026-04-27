@@ -10,6 +10,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@imgly/background-removal": "^1.7.0",
     "jspdf": "^3.0.4",
     "lucide-react": "^0.468.0",
     "next": "16.2.4",

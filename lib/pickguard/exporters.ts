@@ -2,7 +2,9 @@ import type { GeneratedDesign } from "./patternGenerator";
 import { parseViewBox, type PickguardTemplate } from "./templates";
 import {
   getPickguardBaseSize,
+  getStickerBaseSize,
   type PickguardTransform,
+  type StickerTransform,
   type StringOverlay,
   type UploadedPhoto,
 } from "./geometry";
@@ -16,6 +18,15 @@ type MockupExportInput = SvgPackageInput & {
   photo: UploadedPhoto;
   transform: PickguardTransform;
   stringOverlay?: StringOverlay;
+};
+
+type StickerMockupExportInput = {
+  photo: UploadedPhoto;
+  pickguardPhoto: UploadedPhoto;
+  stickerTransform: StickerTransform;
+  overlayDesign?: GeneratedDesign;
+  stringOverlay?: StringOverlay;
+  template?: PickguardTemplate;
 };
 
 export function buildSvgPackage({ template, design }: SvgPackageInput) {
@@ -58,19 +69,48 @@ export async function exportTransparentPng(input: SvgPackageInput) {
   );
 }
 
-export async function exportMockupJpg({
-  template,
-  design,
-  photo,
-  transform,
-  stringOverlay,
-}: MockupExportInput) {
-  const svg = buildMockupSvg({ template, design, photo, transform, stringOverlay });
-  const canvas = await renderSvgToCanvas(svg, photo.width, photo.height, "#111318");
+export async function exportMockupJpg(
+  input: MockupExportInput | StickerMockupExportInput,
+) {
+  const svg =
+    "pickguardPhoto" in input
+      ? buildStickerMockupSvg(input)
+      : buildMockupSvg(input);
+  const canvas = await renderSvgToCanvas(
+    svg,
+    input.photo.width,
+    input.photo.height,
+    "#111318",
+  );
   downloadDataUrl(
     canvas.toDataURL("image/jpeg", 0.92),
     "guitar-pickguard-mockup.jpg",
   );
+}
+
+function buildStickerMockupSvg({
+  photo,
+  pickguardPhoto,
+  overlayDesign,
+  stickerTransform,
+  stringOverlay,
+}: StickerMockupExportInput) {
+  const base = getStickerBaseSize(pickguardPhoto, photo);
+  const stringsSvg = stringOverlay ? buildStringOverlaySvg(stringOverlay) : "";
+  const patternSvg = overlayDesign
+    ? `<image href="${escapeXml(overlayDesign.imageDataUrl)}" x="0" y="0" width="${base.width}" height="${base.height}" preserveAspectRatio="xMidYMid slice" opacity="0.82" style="mix-blend-mode:multiply"/>`
+    : "";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${photo.width}" height="${photo.height}" viewBox="0 0 ${photo.width} ${photo.height}">
+  <rect width="100%" height="100%" fill="#111318"/>
+  <image href="${escapeXml(photo.dataUrl)}" x="0" y="0" width="${photo.width}" height="${photo.height}" preserveAspectRatio="xMidYMid meet"/>
+  <g transform="translate(${stickerTransform.x} ${stickerTransform.y}) rotate(${stickerTransform.rotation}) scale(${stickerTransform.scale}) translate(${-base.width / 2} ${-base.height / 2})">
+    <image href="${escapeXml(pickguardPhoto.dataUrl)}" x="0" y="0" width="${base.width}" height="${base.height}" preserveAspectRatio="xMidYMid meet"/>
+    ${patternSvg}
+  </g>
+  ${stringsSvg}
+</svg>`;
 }
 
 export async function exportPrintablePdf(input: SvgPackageInput) {
