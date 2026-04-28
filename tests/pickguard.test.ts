@@ -8,6 +8,7 @@ import { buildCutoutPhoto } from "../lib/pickguard/backgroundRemoval";
 import {
   applyConstrainedSegmentationAlpha,
   applyDarkTargetConnectedMaskToManualCutout,
+  applyEraseStrokesToManualCutout,
   applyPointSegmentationMaskToManualCutout,
   applyPointSegmentationPreviewPixels,
   buildConstrainedSegmentedManualCutoutPhoto,
@@ -19,6 +20,7 @@ import {
   getInsetPolygonPoints,
   getDominantExteriorRingColors,
   filterExteriorColorsDistinctFromTarget,
+  splitExteriorCleanupColorsByInterior,
   removeEdgeFringePixelsMatchingColors,
   removeNeutralEdgeFringePixels,
   selectPointSegmentationMask,
@@ -358,6 +360,25 @@ describe("manual pickguard cutout helpers", () => {
     assert.equal(getPixelAlpha(manualData, width, 0, 3), 0);
   });
 
+  it("applies erase outside strokes to final manual cutout pixels", () => {
+    const width = 7;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 120, g: 80, b: 50, a: 255 });
+
+    const removed = applyEraseStrokesToManualCutout(
+      data,
+      width,
+      height,
+      { x: 10, y: 20, width, height },
+      [{ points: [{ x: 13, y: 22 }], radiusPx: 1.5 }],
+    );
+
+    assert.equal(removed, 9);
+    assert.equal(getPixelAlpha(data, width, 3, 2), 0);
+    assert.equal(getPixelAlpha(data, width, 0, 0), 255);
+  });
+
   it("uses the confidence mask that contains the clicked target point", () => {
     const backgroundMask = new Float32Array(4 * 4).fill(0.85);
     const pickguardMask = new Float32Array(4 * 4).fill(0.05);
@@ -480,6 +501,35 @@ describe("manual pickguard cutout helpers", () => {
     assert.deepEqual(colors[0], { r: 172, g: 10, b: 19 });
   });
 
+  it("keeps neutral exterior shadow samples alongside saturated body colors", () => {
+    const width = 7;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    fillPixels(data, { r: 24, g: 24, b: 23, a: 255 });
+    setPixel(data, width, 1, 1, { r: 174, g: 12, b: 20, a: 255 });
+    setPixel(data, width, 1, 2, { r: 178, g: 11, b: 22, a: 255 });
+    setPixel(data, width, 1, 3, { r: 168, g: 8, b: 17, a: 255 });
+    setPixel(data, width, 5, 1, { r: 34, g: 35, b: 33, a: 255 });
+    setPixel(data, width, 5, 2, { r: 36, g: 36, b: 34, a: 255 });
+    setPixel(data, width, 5, 3, { r: 33, g: 34, b: 32, a: 255 });
+
+    const colors = getDominantExteriorRingColors(
+      data,
+      width,
+      height,
+      [
+        { x: 2, y: 1 },
+        { x: 4, y: 1 },
+        { x: 4, y: 3 },
+        { x: 2, y: 3 },
+      ],
+      { ringPx: 1.25, maxColors: 4 },
+    );
+
+    assert.ok(colors.some((color) => color.r > 150 && color.g < 40));
+    assert.ok(colors.some((color) => color.r < 60 && color.g < 60));
+  });
+
   it("removes sampled red body fringe while preserving black guard and white ply line", () => {
     const width = 8;
     const height = 5;
@@ -543,6 +593,47 @@ describe("manual pickguard cutout helpers", () => {
         72,
       ),
       [{ r: 170, g: 8, b: 18 }],
+    );
+  });
+
+  it("keeps saturated exterior cleanup colors even near a saturated guard target", () => {
+    assert.deepEqual(
+      filterExteriorColorsDistinctFromTarget(
+        [
+          { r: 125, g: 36, b: 24 },
+          { r: 35, g: 35, b: 34 },
+        ],
+        { r: 118, g: 30, b: 20 },
+        72,
+      ),
+      [
+        { r: 125, g: 36, b: 24 },
+        { r: 35, g: 35, b: 34 },
+      ],
+    );
+  });
+
+  it("limits exterior colors that also appear inside a patterned guard to edge cleanup", () => {
+    assert.deepEqual(
+      splitExteriorCleanupColorsByInterior(
+        [
+          { r: 126, g: 36, b: 24 },
+          { r: 34, g: 34, b: 33 },
+          { r: 178, g: 12, b: 20 },
+        ],
+        [
+          { r: 118, g: 31, b: 22 },
+          { r: 27, g: 27, b: 26 },
+        ],
+        48,
+      ),
+      {
+        globalColors: [{ r: 178, g: 12, b: 20 }],
+        edgeOnlyColors: [
+          { r: 126, g: 36, b: 24 },
+          { r: 34, g: 34, b: 33 },
+        ],
+      },
     );
   });
 
@@ -666,7 +757,7 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /<label\s+className="upload-drop"\s+suppressHydrationWarning/);
   });
 
-  it("uses deterministic clean outline for manual cutouts instead of eager segmentation imports", () => {
+  it("uses point segmentation as the only manual cutout action", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",
       "utf8",
@@ -676,18 +767,19 @@ describe("upload panel hydration guard", () => {
       source,
       /import \{[^}]*createPointSegmentedManualCutout[^}]*\} from/,
     );
-    assert.match(source, /createManualCutout\(sourcePhoto, manualPoints, \{[\s\S]*insetPx: manualInset/);
+    assert.doesNotMatch(source, /createManualCutout/);
     assert.match(source, /Segment from point/);
     assert.doesNotMatch(source, /Clean body color/);
   });
 
-  it("passes edge trim and the current target point into point segmentation", () => {
+  it("passes the current target point into point segmentation without exposed trim state", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",
       "utf8",
     );
 
-    assert.match(source, /createPointSegmentedManualCutout\([\s\S]*sourcePhoto,[\s\S]*manualPoints,[\s\S]*manualTargetPoint,[\s\S]*\{[\s\S]*insetPx: manualInset/);
+    assert.match(source, /createPointSegmentedManualCutout\([\s\S]*sourcePhoto,[\s\S]*manualPoints,[\s\S]*manualTargetPoint,[\s\S]*\{[\s\S]*onProgress: handleCutoutProgress/);
+    assert.doesNotMatch(source, /manualInset/);
   });
 
   it("lets a new target click replace the previous segmentation point", () => {
@@ -714,6 +806,47 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /clipPoints: manualPoints/);
     assert.match(source, /segmentPreview/);
     assert.match(source, /manual-segment-preview/);
+  });
+
+  it("applies erase outside strokes to the generated cutout photo", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /Erase outside/);
+    assert.match(source, /erasePhotoPixels\(manualResultPhoto, stroke\)/);
+    assert.match(source, /onEraseStrokeComplete/);
+    assert.match(source, /manual-erase-stroke/);
+    assert.doesNotMatch(source, /eraseStrokes: manual/);
+  });
+
+  it("keeps erase outside as a post-cutout cleanup instead of a selection tool", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    const manualEditor = source.match(
+      /function ManualCutoutEditor[\s\S]*?function readFileAsDataUrl/,
+    )?.[0] ?? "";
+
+    assert.match(source, /manualResultPhoto/);
+    assert.match(source, /ResultCleanupEditor/);
+    assert.doesNotMatch(manualEditor, /Erase outside/);
+    assert.doesNotMatch(manualEditor, /mode === "erase"/);
+  });
+
+  it("removes edge trim and clean outline controls from the upload panel", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.doesNotMatch(source, /Edge trim/);
+    assert.doesNotMatch(source, /Apply clean outline/);
+    assert.doesNotMatch(source, /manualInset/);
+    assert.doesNotMatch(source, /onInsetChange/);
   });
 
   it("uses MediaPipe interactive segmentation instead of background removal for point prompts", () => {

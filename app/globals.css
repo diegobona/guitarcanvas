@@ -273,6 +273,10 @@ a {
   width: 100%;
 }
 
+.manual-cutout-frame.is-erasing {
+  cursor: cell;
+}
+
 .manual-cutout-frame img,
 .manual-cutout-frame svg {
   display: block;
@@ -337,14 +341,41 @@ a {
   stroke-width: 0.6;
 }
 
+.manual-erase-stroke {
+  fill: none;
+  opacity: 0.82;
+  stroke: #ff5a62;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .manual-mode-row {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.manual-tool-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .source-mode-row {
   margin-bottom: 10px;
+}
+
+.result-cleanup-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.result-cleanup-header span {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
 }
 
 .manual-cutout-toolbar {

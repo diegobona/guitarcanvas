@@ -23,6 +23,7 @@ type ImageBounds = {
 };
 
 type ManualCutoutOptions = {
+  eraseStrokes?: EraseStroke[];
   insetPx?: number;
 };
 
@@ -67,6 +68,16 @@ type RgbColor = {
   b: number;
 };
 
+export type EraseStroke = {
+  points: Point[];
+  radiusPx: number;
+};
+
+type ExteriorCleanupColors = {
+  edgeOnlyColors: RgbColor[];
+  globalColors: RgbColor[];
+};
+
 const POINT_SEGMENTATION_PREVIEW_COLOR: PreviewColor = {
   r: 56,
   g: 189,
@@ -104,6 +115,7 @@ export async function createManualCutout(
   options: ManualCutoutOptions = {},
 ): Promise<UploadedPhoto> {
   const candidate = await createManualCutoutCandidate(sourcePhoto, points, options);
+  applyEraseStrokesToCanvas(candidate.canvas, candidate.bounds, options.eraseStrokes);
 
   return buildManualCutoutPhoto(
     sourcePhoto,
@@ -158,7 +170,7 @@ export async function createPointSegmentedManualCutout(
   const candidate = await createManualCutoutCandidate(sourcePhoto, points, {
     insetPx: options.insetPx,
   });
-  const exteriorColors = await getExteriorRingColorsFromSourcePhoto(
+  const exteriorColors = await getExteriorCleanupColorsFromSourcePhoto(
     sourcePhoto,
     points,
     options.insetPx ?? 0,
@@ -178,6 +190,7 @@ export async function createPointSegmentedManualCutout(
     options.edgeFringePx ?? 12,
     exteriorColors,
   );
+  applyEraseStrokesToCanvas(candidate.canvas, candidate.bounds, options.eraseStrokes);
 
   return buildPointSegmentedManualCutoutPhoto(
     sourcePhoto,
@@ -408,6 +421,42 @@ export function applyPointSegmentationMaskToManualCutout(
       }
     }
   }
+}
+
+export function applyEraseStrokesToManualCutout(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  bounds: ManualCutoutBounds,
+  eraseStrokes: EraseStroke[] = [],
+) {
+  let removed = 0;
+
+  for (const stroke of eraseStrokes) {
+    const radiusPx = Math.max(1, stroke.radiusPx);
+    for (let index = 0; index < stroke.points.length; index += 1) {
+      const point = stroke.points[index];
+      const previousPoint = stroke.points[index - 1] ?? point;
+      const distance = getPointDistance(previousPoint, point);
+      const steps = Math.max(1, Math.ceil(distance / Math.max(1, radiusPx / 2)));
+
+      for (let step = 0; step <= steps; step += 1) {
+        const t = step / steps;
+        const sourceX = previousPoint.x + (point.x - previousPoint.x) * t;
+        const sourceY = previousPoint.y + (point.y - previousPoint.y) * t;
+        removed += eraseCircleFromCutout(
+          data,
+          width,
+          height,
+          sourceX - bounds.x,
+          sourceY - bounds.y,
+          radiusPx,
+        );
+      }
+    }
+  }
+
+  return removed;
 }
 
 export function selectPointSegmentationMask(
@@ -665,9 +714,67 @@ export function getDominantExteriorRingColors(
   const saturatedBuckets = bucketValues.filter(
     (bucket) => bucket.saturation / bucket.count >= 55,
   );
-  const candidates = saturatedBuckets.length > 0 ? saturatedBuckets : bucketValues;
+  const neutralBuckets = bucketValues.filter(
+    (bucket) => bucket.saturation / bucket.count < 55,
+  );
+  const candidates =
+    saturatedBuckets.length > 0
+      ? [
+          ...saturatedBuckets.sort((left, right) => right.count - left.count),
+          ...neutralBuckets.sort((left, right) => right.count - left.count),
+        ]
+      : bucketValues;
 
   return candidates
+    .slice(0, maxColors)
+    .map((bucket) => ({
+      r: Math.round(bucket.r / bucket.count),
+      g: Math.round(bucket.g / bucket.count),
+      b: Math.round(bucket.b / bucket.count),
+    }));
+}
+
+export function getDominantInteriorPolygonColors(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  polygon: Point[],
+  options: {
+    maxColors?: number;
+    minAlpha?: number;
+  } = {},
+): RgbColor[] {
+  const maxColors = options.maxColors ?? 6;
+  const minAlpha = options.minAlpha ?? 180;
+  const bounds = getPolygonBounds(polygon, width, height, 0);
+  const buckets = new Map<
+    string,
+    { count: number; r: number; g: number; b: number; saturation: number }
+  >();
+
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+      if (!isPointInPolygon({ x: x + 0.5, y: y + 0.5 }, polygon)) continue;
+
+      const index = (y * width + x) * 4;
+      if (data[index + 3] < minAlpha) continue;
+
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const key = getColorBucketKey(r, g, b);
+      const bucket =
+        buckets.get(key) ?? { count: 0, r: 0, g: 0, b: 0, saturation: 0 };
+      bucket.count += 1;
+      bucket.r += r;
+      bucket.g += g;
+      bucket.b += b;
+      bucket.saturation += getColorSaturation({ r, g, b });
+      buckets.set(key, bucket);
+    }
+  }
+
+  return [...buckets.values()]
     .sort((left, right) => right.count - left.count)
     .slice(0, maxColors)
     .map((bucket) => ({
@@ -683,9 +790,35 @@ export function filterExteriorColorsDistinctFromTarget(
   threshold = 72,
 ) {
   if (!targetColor) return colors;
+  if (getColorSaturation(targetColor) > 55) return colors;
+
   return colors.filter(
     (color) => getColorDistance(color, targetColor) > threshold,
   );
+}
+
+export function splitExteriorCleanupColorsByInterior(
+  exteriorColors: RgbColor[],
+  interiorColors: RgbColor[],
+  threshold = 56,
+): ExteriorCleanupColors {
+  const edgeOnlyColors: RgbColor[] = [];
+  const globalColors: RgbColor[] = [];
+
+  for (const exteriorColor of exteriorColors) {
+    const appearsInsideGuard = interiorColors.some(
+      (interiorColor) =>
+        getColorDistance(exteriorColor, interiorColor) <= threshold,
+    );
+
+    if (appearsInsideGuard) {
+      edgeOnlyColors.push(exteriorColor);
+    } else {
+      globalColors.push(exteriorColor);
+    }
+  }
+
+  return { edgeOnlyColors, globalColors };
 }
 
 export function applyDarkTargetConnectedMaskToManualCutout(
@@ -802,7 +935,7 @@ function applyPointSegmentationMaskToCanvas(
   mask: SegmentationMask,
   threshold: number,
   edgeFringePx: number,
-  exteriorColors: RgbColor[],
+  exteriorColors: ExteriorCleanupColors,
 ) {
   const context = canvas.getContext("2d");
   if (!context) {
@@ -826,7 +959,16 @@ function applyPointSegmentationMaskToCanvas(
     imageData.data,
     canvas.width,
     canvas.height,
-    exteriorColors,
+    exteriorColors.edgeOnlyColors,
+    {
+      maxDistancePx: Math.max(edgeFringePx * 3, 36),
+    },
+  );
+  removeEdgeFringePixelsMatchingColors(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    exteriorColors.globalColors,
     {
       maxDistancePx: Math.max(canvas.width, canvas.height),
     },
@@ -834,7 +976,30 @@ function applyPointSegmentationMaskToCanvas(
   context.putImageData(imageData, 0, 0);
 }
 
-async function getExteriorRingColorsFromSourcePhoto(
+function applyEraseStrokesToCanvas(
+  canvas: HTMLCanvasElement,
+  bounds: ManualCutoutBounds,
+  eraseStrokes: EraseStroke[] = [],
+) {
+  if (eraseStrokes.length === 0) return;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas cutout is not available in this browser.");
+  }
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  applyEraseStrokesToManualCutout(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    bounds,
+    eraseStrokes,
+  );
+  context.putImageData(imageData, 0, 0);
+}
+
+async function getExteriorCleanupColorsFromSourcePhoto(
   sourcePhoto: UploadedPhoto,
   points: Point[],
   insetPx: number,
@@ -860,15 +1025,27 @@ async function getExteriorRingColorsFromSourcePhoto(
       )
     : null;
 
-  return filterExteriorColorsDistinctFromTarget(
+  const exteriorPolygon = getInsetPolygonPoints(points, insetPx);
+  const interiorPolygon = getInsetPolygonPoints(points, insetPx + 22);
+  const exteriorColors = filterExteriorColorsDistinctFromTarget(
     getDominantExteriorRingColors(
       imageData.data,
       canvas.width,
       canvas.height,
-      getInsetPolygonPoints(points, insetPx),
+      exteriorPolygon,
+      { maxColors: 6 },
     ),
     targetColor,
   );
+  const interiorColors = getDominantInteriorPolygonColors(
+    imageData.data,
+    canvas.width,
+    canvas.height,
+    interiorPolygon,
+    { maxColors: 8 },
+  );
+
+  return splitExteriorCleanupColorsByInterior(exteriorColors, interiorColors);
 }
 
 async function segmentSourcePhotoFromPoint(
@@ -1158,6 +1335,42 @@ function getColorDistance(left: RgbColor, right: RgbColor) {
 
 function getColorSaturation(color: RgbColor) {
   return Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b);
+}
+
+function getPointDistance(left: Point, right: Point) {
+  return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function eraseCircleFromCutout(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  radiusPx: number,
+) {
+  const minX = Math.max(0, Math.floor(centerX - radiusPx));
+  const maxX = Math.min(width - 1, Math.ceil(centerX + radiusPx));
+  const minY = Math.max(0, Math.floor(centerY - radiusPx));
+  const maxY = Math.min(height - 1, Math.ceil(centerY + radiusPx));
+  const radiusSquared = radiusPx * radiusPx;
+  let removed = 0;
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      if (dx * dx + dy * dy > radiusSquared) continue;
+
+      const alphaIndex = (y * width + x) * 4 + 3;
+      if (data[alphaIndex] === 0) continue;
+
+      data[alphaIndex] = 0;
+      removed += 1;
+    }
+  }
+
+  return removed;
 }
 
 function touchesTransparentOrCanvasEdge(

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Check,
+  Eraser,
   ImageUp,
   LoaderCircle,
   LocateFixed,
@@ -19,7 +19,7 @@ import {
   type BackgroundRemovalProgress,
 } from "@/lib/pickguard/backgroundRemoval";
 import type { Point, UploadedPhoto } from "@/lib/pickguard/geometry";
-import { createManualCutout } from "@/lib/pickguard/manualCutout";
+import type { EraseStroke } from "@/lib/pickguard/manualCutout";
 
 type UploadPanelProps = {
   title: string;
@@ -65,11 +65,18 @@ export function UploadPanel({
   const [manualSegmentPreview, setManualSegmentPreview] =
     useState<UploadedPhoto | null>(null);
   const [manualPreviewLoading, setManualPreviewLoading] = useState(false);
-  const [manualInset, setManualInset] = useState(4);
   const [manualApplying, setManualApplying] = useState(false);
+  const [manualResultPhoto, setManualResultPhoto] = useState<UploadedPhoto | null>(
+    null,
+  );
+  const [manualResultHistory, setManualResultHistory] = useState<UploadedPhoto[]>(
+    [],
+  );
+  const [resultEraseRadius, setResultEraseRadius] = useState(24);
+  const [resultEraseApplying, setResultEraseApplying] = useState(false);
   const [pickguardSourceMode, setPickguardSourceMode] =
     useState<PickguardSourceMode>("single");
-  const displayPhoto = sourcePhoto ?? photo;
+  const displayPhoto = manualResultPhoto ?? sourcePhoto ?? photo;
 
   async function handleFile(file: File | undefined) {
     setError(null);
@@ -80,6 +87,8 @@ export function UploadPanel({
     setManualTargetPoint(null);
     setManualSegmentPreview(null);
     setManualPreviewLoading(false);
+    setManualResultPhoto(null);
+    setManualResultHistory([]);
     previewRequestRef.current += 1;
     setSourcePhoto(null);
 
@@ -135,26 +144,6 @@ export function UploadPanel({
     setCutout({ status: "removing", progress: percent });
   }
 
-  async function handleApplyManualCutout() {
-    if (!sourcePhoto || manualPoints.length < 3) return;
-
-    setError(null);
-    setManualApplying(true);
-    try {
-      const manualPhoto = await createManualCutout(sourcePhoto, manualPoints, {
-        insetPx: manualInset,
-      });
-      onPhotoLoaded(manualPhoto);
-      setCutout({ status: "manualDone", progress: 100 });
-      setManualOpen(false);
-    } catch {
-      setCutout({ status: "error", progress: 0 });
-      setError("Clean outline failed. Please redraw the pickguard outline.");
-    } finally {
-      setManualApplying(false);
-    }
-  }
-
   async function handleApplyPointSegmentedManualCutout() {
     if (!sourcePhoto || manualPoints.length < 3 || !manualTargetPoint) return;
 
@@ -170,11 +159,12 @@ export function UploadPanel({
         manualPoints,
         manualTargetPoint,
         {
-          insetPx: manualInset,
           onProgress: handleCutoutProgress,
         },
       );
       onPhotoLoaded(manualPhoto);
+      setManualResultPhoto(manualPhoto);
+      setManualResultHistory([]);
       setCutout({ status: "manualDone", progress: 100 });
       setManualOpen(false);
     } catch {
@@ -202,7 +192,6 @@ export function UploadPanel({
       );
       const preview = await createPointSegmentationPreview(sourcePhoto, point, {
         clipPoints: manualPoints,
-        insetPx: manualInset,
       });
 
       if (previewRequestRef.current === requestId) {
@@ -217,6 +206,34 @@ export function UploadPanel({
         setManualPreviewLoading(false);
       }
     }
+  }
+
+  async function handleResultEraseStroke(stroke: EraseStroke) {
+    if (!manualResultPhoto) return;
+
+    setResultEraseApplying(true);
+    setError(null);
+    try {
+      const nextPhoto = await erasePhotoPixels(manualResultPhoto, stroke);
+      setManualResultHistory((history) => [...history, manualResultPhoto]);
+      setManualResultPhoto(nextPhoto);
+      onPhotoLoaded(nextPhoto);
+    } catch {
+      setError("Erase failed. Please try a shorter stroke.");
+    } finally {
+      setResultEraseApplying(false);
+    }
+  }
+
+  function handleResultEraseUndo() {
+    setManualResultHistory((history) => {
+      const previousPhoto = history.at(-1);
+      if (!previousPhoto) return history;
+
+      setManualResultPhoto(previousPhoto);
+      onPhotoLoaded(previousPhoto);
+      return history.slice(0, -1);
+    });
   }
 
   return (
@@ -289,14 +306,12 @@ export function UploadPanel({
       {manualOpen && sourcePhoto ? (
         <ManualCutoutEditor
           applying={manualApplying}
-          insetPx={manualInset}
           mode={manualMode}
           photo={sourcePhoto}
           points={manualPoints}
           previewLoading={manualPreviewLoading}
           segmentPreview={manualSegmentPreview}
           targetPoint={manualTargetPoint}
-          onApply={handleApplyManualCutout}
           onApplySegment={handleApplyPointSegmentedManualCutout}
           onClear={() => {
             setManualPoints([]);
@@ -306,7 +321,6 @@ export function UploadPanel({
             previewRequestRef.current += 1;
             setManualMode("outline");
           }}
-          onInsetChange={setManualInset}
           onPointAdd={(point) => {
             setManualTargetPoint(null);
             setManualSegmentPreview(null);
@@ -323,6 +337,17 @@ export function UploadPanel({
             previewRequestRef.current += 1;
             setManualPoints((currentPoints) => currentPoints.slice(0, -1));
           }}
+        />
+      ) : null}
+      {manualResultPhoto ? (
+        <ResultCleanupEditor
+          applying={resultEraseApplying}
+          canUndo={manualResultHistory.length > 0}
+          eraseRadiusPx={resultEraseRadius}
+          photo={manualResultPhoto}
+          onEraseRadiusChange={setResultEraseRadius}
+          onEraseStrokeComplete={(stroke) => void handleResultEraseStroke(stroke)}
+          onEraseUndo={handleResultEraseUndo}
         />
       ) : null}
       {displayPhoto ? (
@@ -374,7 +399,7 @@ function CutoutStatus({ state }: { state: CutoutState }) {
   }
 
   if (state.status === "manualDone") {
-    return <p className="helper-text">Clean outline applied. Transparent PNG loaded.</p>;
+    return <p className="helper-text">Pickguard cutout loaded. Use cleanup only if needed.</p>;
   }
 
   return null;
@@ -382,17 +407,14 @@ function CutoutStatus({ state }: { state: CutoutState }) {
 
 type ManualCutoutEditorProps = {
   applying: boolean;
-  insetPx: number;
   mode: ManualMode;
   photo: UploadedPhoto;
   points: Point[];
   previewLoading: boolean;
   segmentPreview: UploadedPhoto | null;
   targetPoint: Point | null;
-  onApply: () => void;
   onApplySegment: () => void;
   onClear: () => void;
-  onInsetChange: (insetPx: number) => void;
   onModeChange: (mode: ManualMode) => void;
   onPointAdd: (point: Point) => void;
   onTargetPointChange: (point: Point) => void;
@@ -401,17 +423,14 @@ type ManualCutoutEditorProps = {
 
 function ManualCutoutEditor({
   applying,
-  insetPx,
   mode,
   photo,
   points,
   previewLoading,
   segmentPreview,
   targetPoint,
-  onApply,
   onApplySegment,
   onClear,
-  onInsetChange,
   onModeChange,
   onPointAdd,
   onTargetPointChange,
@@ -419,15 +438,20 @@ function ManualCutoutEditor({
 }: ManualCutoutEditorProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
 
-  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+  function getPhotoPoint(event: ReactPointerEvent<HTMLDivElement>) {
     const frame = frameRef.current;
-    if (!frame) return;
+    if (!frame) return null;
 
     const rect = frame.getBoundingClientRect();
-    const point = {
+    return {
       x: clamp(((event.clientX - rect.left) / rect.width) * photo.width, 0, photo.width),
       y: clamp(((event.clientY - rect.top) / rect.height) * photo.height, 0, photo.height),
     };
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const point = getPhotoPoint(event);
+    if (!point) return;
 
     if (mode === "target") {
       onTargetPointChange(point);
@@ -493,21 +517,9 @@ function ManualCutoutEditor({
         </svg>
       </div>
       <p className="helper-text">
-        Click around the pickguard, then trim the edge inward to remove extra
-        guitar body or background.
+        Click around the pickguard, pick one point on the pickguard, then segment it.
       </p>
-      <label className="field manual-cutout-trim">
-        <span>Edge trim</span>
-        <input
-          max="18"
-          min="0"
-          step="1"
-          type="range"
-          value={insetPx}
-          onChange={(event) => onInsetChange(Number(event.target.value))}
-        />
-      </label>
-      <div className="manual-mode-row">
+      <div className="manual-mode-row manual-tool-row">
         <button
           className={mode === "outline" ? "primary-button" : "secondary-button"}
           disabled={applying}
@@ -547,20 +559,7 @@ function ManualCutoutEditor({
           <Trash2 aria-hidden size={17} />
         </button>
         <button
-          className="primary-button"
-          disabled={points.length < 3 || applying}
-          type="button"
-          onClick={onApply}
-        >
-          {applying ? (
-            <LoaderCircle aria-hidden className="spin-icon" size={17} />
-          ) : (
-            <Check aria-hidden size={17} />
-          )}
-          Apply clean outline
-        </button>
-        <button
-          className="secondary-button manual-segment-button"
+          className="primary-button manual-segment-button"
           disabled={points.length < 3 || !targetPoint || applying || previewLoading}
           type="button"
           onClick={onApplySegment}
@@ -592,6 +591,216 @@ function readImageDimensions(src: string) {
   });
 }
 
+type ResultCleanupEditorProps = {
+  applying: boolean;
+  canUndo: boolean;
+  eraseRadiusPx: number;
+  photo: UploadedPhoto;
+  onEraseRadiusChange: (radiusPx: number) => void;
+  onEraseStrokeComplete: (stroke: EraseStroke) => void;
+  onEraseUndo: () => void;
+};
+
+function ResultCleanupEditor({
+  applying,
+  canUndo,
+  eraseRadiusPx,
+  photo,
+  onEraseRadiusChange,
+  onEraseStrokeComplete,
+  onEraseUndo,
+}: ResultCleanupEditorProps) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [activeErasePoints, setActiveErasePoints] = useState<Point[]>([]);
+
+  function getPhotoPoint(event: ReactPointerEvent<HTMLDivElement>) {
+    const frame = frameRef.current;
+    if (!frame) return null;
+
+    const rect = frame.getBoundingClientRect();
+    return {
+      x: clamp(((event.clientX - rect.left) / rect.width) * photo.width, 0, photo.width),
+      y: clamp(((event.clientY - rect.top) / rect.height) * photo.height, 0, photo.height),
+    };
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const point = getPhotoPoint(event);
+    if (!point || applying) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setActiveErasePoints([point]);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (activeErasePoints.length === 0 || applying) return;
+
+    const point = getPhotoPoint(event);
+    if (!point) return;
+
+    setActiveErasePoints((currentPoints) =>
+      appendErasePoint(currentPoints, point, eraseRadiusPx),
+    );
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const point = getPhotoPoint(event);
+    finishEraseStroke(point);
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function finishEraseStroke(point?: Point | null) {
+    setActiveErasePoints((currentPoints) => {
+      const nextPoints = point
+        ? appendErasePoint(currentPoints, point, eraseRadiusPx)
+        : currentPoints;
+
+      if (nextPoints.length > 0) {
+        onEraseStrokeComplete({ points: nextPoints, radiusPx: eraseRadiusPx });
+      }
+
+      return [];
+    });
+  }
+
+  const activeStroke = activeErasePoints
+    .map((point) => `${(point.x / photo.width) * 100},${(point.y / photo.height) * 100}`)
+    .join(" ");
+  const activeStrokeWidth = Math.max(
+    0.9,
+    (eraseRadiusPx / Math.max(photo.width, photo.height)) * 200,
+  );
+
+  return (
+    <div className="manual-cutout-editor result-cleanup-editor">
+      <div className="result-cleanup-header">
+        <span>
+          <Eraser aria-hidden size={17} />
+          Erase outside
+        </span>
+        <button
+          className="icon-button"
+          disabled={!canUndo || applying}
+          title="Undo erase"
+          type="button"
+          onClick={onEraseUndo}
+        >
+          <Undo2 aria-hidden size={17} />
+        </button>
+      </div>
+      <div
+        aria-label="Pickguard result cleanup editor"
+        className="manual-cutout-frame is-erasing"
+        ref={frameRef}
+        role="button"
+        style={{ aspectRatio: `${photo.width} / ${photo.height}` }}
+        tabIndex={0}
+        onPointerCancel={() => finishEraseStroke()}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        <img alt="Generated pickguard cutout" draggable={false} src={photo.dataUrl} />
+        <svg aria-hidden viewBox="0 0 100 100" preserveAspectRatio="none">
+          {activeStroke ? (
+            activeStroke.includes(" ") ? (
+              <polyline
+                className="manual-erase-stroke"
+                points={activeStroke}
+                strokeWidth={activeStrokeWidth}
+              />
+            ) : (
+              <circle
+                className="manual-erase-stroke"
+                cx={activeStroke.split(",")[0]}
+                cy={activeStroke.split(",")[1]}
+                r={activeStrokeWidth / 2}
+              />
+            )
+          ) : null}
+        </svg>
+      </div>
+      <label className="field manual-erase-size">
+        <span>Erase size</span>
+        <input
+          max="80"
+          min="8"
+          step="2"
+          type="range"
+          value={eraseRadiusPx}
+          onChange={(event) => onEraseRadiusChange(Number(event.target.value))}
+        />
+      </label>
+    </div>
+  );
+}
+
+async function erasePhotoPixels(photo: UploadedPhoto, stroke: EraseStroke) {
+  const image = await loadImage(photo.dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(photo.width);
+  canvas.height = Math.round(photo.height);
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("Could not create cleanup canvas.");
+  }
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  context.save();
+  context.globalCompositeOperation = "destination-out";
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = stroke.radiusPx * 2;
+  context.strokeStyle = "rgba(0, 0, 0, 1)";
+  context.fillStyle = "rgba(0, 0, 0, 1)";
+
+  if (stroke.points.length === 1) {
+    const point = stroke.points[0];
+    context.beginPath();
+    context.arc(point.x, point.y, stroke.radiusPx, 0, Math.PI * 2);
+    context.fill();
+  } else if (stroke.points.length > 1) {
+    context.beginPath();
+    context.moveTo(stroke.points[0].x, stroke.points[0].y);
+    for (const point of stroke.points.slice(1)) {
+      context.lineTo(point.x, point.y);
+    }
+    context.stroke();
+  }
+
+  context.restore();
+
+  return {
+    ...photo,
+    dataUrl: canvas.toDataURL("image/png"),
+  };
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not decode the cutout image."));
+    image.src = src;
+  });
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function appendErasePoint(points: Point[], point: Point, radiusPx: number) {
+  const previousPoint = points.at(-1);
+  if (!previousPoint) return [point];
+
+  const minimumDistance = Math.max(2, radiusPx / 4);
+  const distance = Math.hypot(previousPoint.x - point.x, previousPoint.y - point.y);
+
+  if (distance < minimumDistance) return points;
+  return [...points, point];
 }
