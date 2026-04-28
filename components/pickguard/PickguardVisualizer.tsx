@@ -113,6 +113,7 @@ export function PickguardVisualizer() {
             onPhotoLoaded={handlePhotoLoaded}
           />
           <UploadPanel
+            allowPickguardSourceMode
             emptyLabel="Upload pickguard photo"
             errorLabel="Please upload a JPG or PNG pickguard photo."
             photo={pickguardPhoto}

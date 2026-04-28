@@ -27,6 +27,7 @@ type UploadPanelProps = {
   replaceLabel: string;
   errorLabel: string;
   photo: UploadedPhoto | null;
+  allowPickguardSourceMode?: boolean;
   removeBackground?: boolean;
   onPhotoLoaded: (photo: UploadedPhoto) => void;
 };
@@ -37,6 +38,7 @@ type CutoutState = {
 };
 
 type ManualMode = "outline" | "target";
+type PickguardSourceMode = "single" | "guitar";
 
 export function UploadPanel({
   title,
@@ -44,6 +46,7 @@ export function UploadPanel({
   replaceLabel,
   errorLabel,
   photo,
+  allowPickguardSourceMode = false,
   removeBackground = false,
   onPhotoLoaded,
 }: UploadPanelProps) {
@@ -64,6 +67,9 @@ export function UploadPanel({
   const [manualPreviewLoading, setManualPreviewLoading] = useState(false);
   const [manualInset, setManualInset] = useState(4);
   const [manualApplying, setManualApplying] = useState(false);
+  const [pickguardSourceMode, setPickguardSourceMode] =
+    useState<PickguardSourceMode>("single");
+  const displayPhoto = sourcePhoto ?? photo;
 
   async function handleFile(file: File | undefined) {
     setError(null);
@@ -96,6 +102,11 @@ export function UploadPanel({
 
     if (!removeBackground) {
       onPhotoLoaded(nextPhoto);
+      return;
+    }
+
+    if (pickguardSourceMode === "guitar") {
+      setManualOpen(true);
       return;
     }
 
@@ -211,15 +222,45 @@ export function UploadPanel({
   return (
     <section className="panel">
       <h2>{title}</h2>
+      {allowPickguardSourceMode ? (
+        <div className="manual-mode-row source-mode-row">
+          <button
+            className={
+              pickguardSourceMode === "single"
+                ? "primary-button"
+                : "secondary-button"
+            }
+            disabled={cutout.status === "removing"}
+            type="button"
+            onClick={() => setPickguardSourceMode("single")}
+          >
+            <WandSparkles aria-hidden size={17} />
+            Single pickguard image
+          </button>
+          <button
+            className={
+              pickguardSourceMode === "guitar"
+                ? "primary-button"
+                : "secondary-button"
+            }
+            disabled={cutout.status === "removing"}
+            type="button"
+            onClick={() => setPickguardSourceMode("guitar")}
+          >
+            <Scissors aria-hidden size={17} />
+            Guitar photo (with pickguard)
+          </button>
+        </div>
+      ) : null}
       <label className="upload-drop" suppressHydrationWarning>
         {cutout.status === "removing" ? (
           <LoaderCircle aria-hidden className="spin-icon" size={22} />
-        ) : removeBackground ? (
+        ) : removeBackground && pickguardSourceMode === "single" ? (
           <WandSparkles aria-hidden size={22} />
         ) : (
           <ImageUp aria-hidden size={22} />
         )}
-        <span>{photo ? replaceLabel : emptyLabel}</span>
+        <span>{displayPhoto ? replaceLabel : emptyLabel}</span>
         <input
           ref={inputRef}
           accept="image/jpeg,image/png"
@@ -284,13 +325,13 @@ export function UploadPanel({
           }}
         />
       ) : null}
-      {photo ? (
+      {displayPhoto ? (
         <p className="file-meta">
-          {photo.name} - {photo.width} x {photo.height}px
+          {displayPhoto.name} - {displayPhoto.width} x {displayPhoto.height}px
         </p>
       ) : null}
       {error ? <p className="helper-text">{error}</p> : null}
-      {photo ? (
+      {displayPhoto ? (
         <button
           className="secondary-button"
           disabled={cutout.status === "removing"}

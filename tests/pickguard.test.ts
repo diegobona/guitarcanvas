@@ -18,6 +18,7 @@ import {
   getManualCutoutMaskPoints,
   getInsetPolygonPoints,
   getDominantExteriorRingColors,
+  filterExteriorColorsDistinctFromTarget,
   removeEdgeFringePixelsMatchingColors,
   removeNeutralEdgeFringePixels,
   selectPointSegmentationMask,
@@ -531,6 +532,67 @@ describe("manual pickguard cutout helpers", () => {
     assert.equal(getPixelAlpha(data, width, 2, 2), 255);
   });
 
+  it("ignores sampled body colors that are too close to the clicked guard color", () => {
+    assert.deepEqual(
+      filterExteriorColorsDistinctFromTarget(
+        [
+          { r: 28, g: 29, b: 27 },
+          { r: 170, g: 8, b: 18 },
+        ],
+        { r: 24, g: 24, b: 23 },
+        72,
+      ),
+      [{ r: 170, g: 8, b: 18 }],
+    );
+  });
+
+  it("does not depend on a dark connected component after point segmentation", () => {
+    const source = readFileSync(
+      "lib/pickguard/manualCutout.ts",
+      "utf8",
+    );
+
+    const canvasPipeline = source.match(
+      /function applyPointSegmentationMaskToCanvas[\s\S]*?context\.putImageData\(imageData, 0, 0\);[\s\S]*?\}/,
+    )?.[0] ?? "";
+
+    assert.ok(canvasPipeline.length > 0);
+    assert.doesNotMatch(canvasPipeline, /applyDarkTargetConnectedMaskToManualCutout/);
+  });
+
+  it("keeps separated dark guard islands when the point mask selects them", () => {
+    const width = 9;
+    const height = 5;
+    const data = new Uint8ClampedArray(width * height * 4);
+    const maskData = new Float32Array(width * height).fill(0.9);
+    fillPixels(data, { r: 0, g: 0, b: 0, a: 0 });
+
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 7; x += 1) {
+        setPixel(data, width, x, y, { r: 24, g: 24, b: 23, a: 255 });
+      }
+    }
+
+    setPixel(data, width, 4, 2, { r: 245, g: 246, b: 241, a: 255 });
+    setPixel(data, width, 2, 2, { r: 0, g: 0, b: 0, a: 0 });
+    setPixel(data, width, 6, 2, { r: 0, g: 0, b: 0, a: 0 });
+
+    applyPointSegmentationMaskToManualCutout(
+      data,
+      width,
+      height,
+      { x: 0, y: 0, width, height },
+      { width, height },
+      { data: maskData, width, height },
+      0.5,
+    );
+
+    assert.equal(getPixelAlpha(data, width, 1, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 3, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 5, 2), 255);
+    assert.equal(getPixelAlpha(data, width, 7, 2), 255);
+  });
+
   it("keeps the dark target guard component and drops surrounding red body", () => {
     const width = 11;
     const height = 9;
@@ -570,6 +632,31 @@ describe("manual pickguard cutout helpers", () => {
 });
 
 describe("upload panel hydration guard", () => {
+  it("offers separate upload modes for standalone pickguards and guitar photos", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /Single pickguard image/);
+    assert.match(source, /Guitar photo \(with pickguard\)/);
+    assert.match(source, /pickguardSourceMode/);
+  });
+
+  it("skips automatic background removal when the pickguard source is a guitar photo", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /pickguardSourceMode === "guitar"/);
+    assert.match(source, /setManualOpen\(true\)/);
+    assert.match(
+      source,
+      /if \(pickguardSourceMode === "guitar"\) \{[\s\S]*setManualOpen\(true\);[\s\S]*return;[\s\S]*\}[\s\S]*setCutout\(\{ status: "removing", progress: 0 \}\);/,
+    );
+  });
+
   it("suppresses upload drop attribute mismatches from cursor extensions", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",

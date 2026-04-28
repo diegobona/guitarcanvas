@@ -162,6 +162,7 @@ export async function createPointSegmentedManualCutout(
     sourcePhoto,
     points,
     options.insetPx ?? 0,
+    targetPoint,
   );
 
   options.onProgress?.({ key: "interactive-segmenter", current: 0, total: 1 });
@@ -173,7 +174,6 @@ export async function createPointSegmentedManualCutout(
     candidate.bounds,
     sourcePhoto,
     mask,
-    targetPoint,
     options.threshold ?? 0.5,
     options.edgeFringePx ?? 12,
     exteriorColors,
@@ -677,6 +677,17 @@ export function getDominantExteriorRingColors(
     }));
 }
 
+export function filterExteriorColorsDistinctFromTarget(
+  colors: RgbColor[],
+  targetColor: RgbColor | null,
+  threshold = 72,
+) {
+  if (!targetColor) return colors;
+  return colors.filter(
+    (color) => getColorDistance(color, targetColor) > threshold,
+  );
+}
+
 export function applyDarkTargetConnectedMaskToManualCutout(
   data: Uint8ClampedArray,
   width: number,
@@ -789,7 +800,6 @@ function applyPointSegmentationMaskToCanvas(
   bounds: ManualCutoutBounds,
   sourceSize: SourceImageSize,
   mask: SegmentationMask,
-  targetPoint: Point,
   threshold: number,
   edgeFringePx: number,
   exteriorColors: RgbColor[],
@@ -808,15 +818,6 @@ function applyPointSegmentationMaskToCanvas(
     sourceSize,
     mask,
     threshold,
-  );
-  applyDarkTargetConnectedMaskToManualCutout(
-    imageData.data,
-    canvas.width,
-    canvas.height,
-    {
-      x: targetPoint.x - bounds.x,
-      y: targetPoint.y - bounds.y,
-    },
   );
   removeNeutralEdgeFringePixels(imageData.data, canvas.width, canvas.height, {
     maxDistancePx: edgeFringePx,
@@ -837,6 +838,7 @@ async function getExteriorRingColorsFromSourcePhoto(
   sourcePhoto: UploadedPhoto,
   points: Point[],
   insetPx: number,
+  targetPoint?: Point,
 ) {
   const image = await loadImage(sourcePhoto.dataUrl);
   const canvas = document.createElement("canvas");
@@ -850,12 +852,22 @@ async function getExteriorRingColorsFromSourcePhoto(
 
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const targetColor = targetPoint
+    ? getPixelColor(
+        imageData.data,
+        Math.round(clamp(targetPoint.y, 0, canvas.height - 1)) * canvas.width +
+          Math.round(clamp(targetPoint.x, 0, canvas.width - 1)),
+      )
+    : null;
 
-  return getDominantExteriorRingColors(
-    imageData.data,
-    canvas.width,
-    canvas.height,
-    getInsetPolygonPoints(points, insetPx),
+  return filterExteriorColorsDistinctFromTarget(
+    getDominantExteriorRingColors(
+      imageData.data,
+      canvas.width,
+      canvas.height,
+      getInsetPolygonPoints(points, insetPx),
+    ),
+    targetColor,
   );
 }
 
