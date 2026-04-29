@@ -801,6 +801,46 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /<label\s+className="upload-drop"\s+suppressHydrationWarning/);
   });
 
+  it("uses the upload dropzone replace label instead of a separate re-upload button", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(source, /displayPhoto \? replaceLabel : emptyLabel/);
+    assert.doesNotMatch(source, /Re-upload/);
+    assert.doesNotMatch(source, /RefreshCw/);
+  });
+
+  it("styles the manual outline entry separately from action buttons", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+    const stylesheet = readFileSync("app/globals.css", "utf8");
+
+    assert.match(source, /className="manual-outline-toggle"/);
+    assert.doesNotMatch(
+      source,
+      /className="secondary-button"[\s\S]*Manual outline/,
+    );
+    assert.match(stylesheet, /\.manual-outline-toggle/);
+  });
+
+  it("shows an outline example preview for the manual outline entry", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+    const stylesheet = readFileSync("app/globals.css", "utf8");
+
+    assert.match(source, /manual-outline-help/);
+    assert.match(source, /manual-outline-example/);
+    assert.match(source, /Click the first point to close/);
+    assert.match(stylesheet, /\.manual-outline-help:hover \.manual-outline-example/);
+    assert.match(stylesheet, /\.manual-outline-help:focus-within \.manual-outline-example/);
+  });
+
   it("uses point segmentation as the only manual cutout action", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",

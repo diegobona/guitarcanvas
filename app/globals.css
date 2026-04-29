@@ -238,7 +238,114 @@ a {
 }
 
 .manual-cutout-actions {
-  margin-top: 10px;
+  margin-top: 8px;
+}
+
+.manual-outline-help {
+  display: inline-flex;
+  position: relative;
+}
+
+.manual-outline-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.manual-outline-toggle:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.manual-outline-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.manual-outline-example {
+  background: #151820;
+  border: 1px solid #343b48;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  display: grid;
+  gap: 8px;
+  left: 0;
+  opacity: 0;
+  padding: 10px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  transform: translateY(-4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  width: min(280px, 72vw);
+  z-index: 20;
+}
+
+.manual-outline-help:hover .manual-outline-example,
+.manual-outline-help:focus-within .manual-outline-example {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.manual-outline-example-art {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.manual-outline-example-bg {
+  fill: #f5f2ea;
+}
+
+.manual-outline-example-guitar {
+  fill: #c94431;
+  stroke: #7a211a;
+  stroke-width: 2;
+}
+
+.manual-outline-example-guard {
+  fill: #212328;
+  stroke: #f3f0e8;
+  stroke-width: 4;
+}
+
+.manual-outline-example-line {
+  fill: none;
+  stroke: #f0bf61;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.manual-outline-example-point {
+  fill: #46d9ff;
+  stroke: #0b2630;
+  stroke-width: 2;
+}
+
+.manual-outline-example-point.is-start {
+  fill: #ffe28a;
+}
+
+.manual-outline-example-target {
+  fill: #ff5a62;
+  stroke: #fff1cf;
+  stroke-width: 3;
+}
+
+.manual-outline-example p {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  margin: 0;
 }
 
 .manual-cutout-editor {

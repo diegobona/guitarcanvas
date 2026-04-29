@@ -4,7 +4,6 @@ import {
   Eraser,
   ImageUp,
   LoaderCircle,
-  RefreshCw,
   Scissors,
   Trash2,
   Undo2,
@@ -304,15 +303,65 @@ export function UploadPanel({
       ) : null}
       {removeBackground && sourcePhoto ? (
         <div className="manual-cutout-actions">
-          <button
-            className="secondary-button"
-            disabled={cutout.status === "removing"}
-            type="button"
-            onClick={() => setManualOpen((isOpen) => !isOpen)}
-          >
-            <Scissors aria-hidden size={17} />
-            Manual outline
-          </button>
+          <div className="manual-outline-help">
+            <button
+              aria-describedby="manual-outline-example-caption"
+              className="manual-outline-toggle"
+              disabled={cutout.status === "removing"}
+              type="button"
+              onClick={() => setManualOpen((isOpen) => !isOpen)}
+            >
+              <Scissors aria-hidden size={17} />
+              Manual outline
+            </button>
+            <div className="manual-outline-example" role="tooltip">
+              <svg
+                aria-hidden
+                className="manual-outline-example-art"
+                viewBox="0 0 220 132"
+              >
+                <rect className="manual-outline-example-bg" height="132" width="220" />
+                <path
+                  className="manual-outline-example-guitar"
+                  d="M37 18 C18 34 25 83 47 108 C80 134 151 127 179 101 C205 74 197 31 169 19 C145 9 126 34 110 39 C90 44 69 5 37 18 Z"
+                />
+                <path
+                  className="manual-outline-example-guard"
+                  d="M75 33 C58 42 55 78 73 93 C94 111 151 104 166 82 C181 58 161 31 134 36 C116 39 105 53 91 46 C84 43 82 34 75 33 Z"
+                />
+                <polyline
+                  className="manual-outline-example-line"
+                  points="73,31 112,35 156,42 172,70 159,100 103,108 64,88 57,55 73,31"
+                />
+                {[
+                  [73, 31],
+                  [112, 35],
+                  [156, 42],
+                  [172, 70],
+                  [159, 100],
+                  [103, 108],
+                  [64, 88],
+                  [57, 55],
+                ].map(([cx, cy], index) => (
+                  <circle
+                    className={
+                      index === 0
+                        ? "manual-outline-example-point is-start"
+                        : "manual-outline-example-point"
+                    }
+                    cx={cx}
+                    cy={cy}
+                    key={`${cx}-${cy}`}
+                    r={index === 0 ? 5 : 4}
+                  />
+                ))}
+                <circle className="manual-outline-example-target" cx="115" cy="71" r="6" />
+              </svg>
+              <p id="manual-outline-example-caption">
+                Click the first point to close, then click inside.
+              </p>
+            </div>
+          </div>
         </div>
       ) : null}
       {manualOpen && sourcePhoto ? (
@@ -375,17 +424,6 @@ export function UploadPanel({
         </p>
       ) : null}
       {error ? <p className="helper-text">{error}</p> : null}
-      {displayPhoto ? (
-        <button
-          className="secondary-button"
-          disabled={cutout.status === "removing"}
-          type="button"
-          onClick={() => inputRef.current?.click()}
-        >
-          <RefreshCw aria-hidden size={17} />
-          Re-upload
-        </button>
-      ) : null}
     </section>
   );
 }
