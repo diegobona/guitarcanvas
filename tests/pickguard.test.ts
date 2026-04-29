@@ -752,6 +752,32 @@ describe("upload panel hydration guard", () => {
     assert.match(css, /\.source-mode-option\.is-selected/);
   });
 
+  it("marks the standalone pickguard option as recommended and previews examples on hover", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+    const css = readFileSync("app/globals.css", "utf8");
+    const sourceModeMarkup = source.match(
+      /<div className="source-mode-row">[\s\S]*?<\/div>/,
+    )?.[0] ?? "";
+
+    assert.match(sourceModeMarkup, /Recommended/);
+    assert.match(sourceModeMarkup, /source-mode-preview/);
+    assert.match(sourceModeMarkup, /source-mode-example/);
+    assert.match(sourceModeMarkup, /source-mode-pickguard-example/);
+    assert.match(sourceModeMarkup, /source-mode-guitar-example/);
+    assert.doesNotMatch(sourceModeMarkup, /Only the pickguard/);
+    assert.doesNotMatch(sourceModeMarkup, /Full guitar photo/);
+    assert.doesNotMatch(sourceModeMarkup, /source-mode-hint/);
+    assert.match(css, /\.source-mode-example/);
+    assert.match(css, /\.source-mode-preview/);
+    assert.match(css, /\.source-mode-option:hover \.source-mode-preview/);
+    assert.match(css, /\.source-mode-option:focus-visible \.source-mode-preview/);
+    assert.match(css, /\.source-mode-recommendation/);
+    assert.doesNotMatch(css, /\.source-mode-hint/);
+  });
+
   it("skips automatic background removal when the pickguard source is a guitar photo", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",

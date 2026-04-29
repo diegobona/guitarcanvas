@@ -250,8 +250,17 @@ export function UploadPanel({
             type="button"
             onClick={() => setPickguardSourceMode("single")}
           >
-            <WandSparkles aria-hidden size={17} />
-            Single pickguard image
+            <span className="source-mode-copy">
+              <span className="source-mode-title">
+                Single pickguard image
+                <span className="source-mode-recommendation">Recommended</span>
+              </span>
+            </span>
+            <span className="source-mode-preview" aria-hidden>
+              <span className="source-mode-example source-mode-pickguard-example">
+                <span />
+              </span>
+            </span>
           </button>
           <button
             aria-pressed={pickguardSourceMode === "guitar"}
@@ -262,8 +271,14 @@ export function UploadPanel({
             type="button"
             onClick={() => setPickguardSourceMode("guitar")}
           >
-            <Scissors aria-hidden size={17} />
-            Guitar photo (with pickguard)
+            <span className="source-mode-copy">
+              <span className="source-mode-title">Guitar photo (with pickguard)</span>
+            </span>
+            <span className="source-mode-preview" aria-hidden>
+              <span className="source-mode-example source-mode-guitar-example">
+                <span />
+              </span>
+            </span>
           </button>
         </div>
       ) : null}
