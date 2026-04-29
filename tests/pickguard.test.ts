@@ -92,6 +92,14 @@ describe("string overlay builder", () => {
     assert.ok(overlay.end.y < 600);
   });
 
+  it("defaults virtual strings to a narrower vertical guide", () => {
+    const overlay = getInitialStringOverlay({ width: 800, height: 1200 });
+
+    assert.equal(overlay.start.x, 400);
+    assert.equal(overlay.end.x, 400);
+    assert.equal(overlay.spread, 80);
+  });
+
   it("keeps dragged string guide handles out of the bottom edge area", () => {
     const clamped = clampStringGuidePoint(
       { width: 800, height: 1200 },
@@ -839,6 +847,18 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /Click the first point to close/);
     assert.match(stylesheet, /\.manual-outline-help:hover \.manual-outline-example/);
     assert.match(stylesheet, /\.manual-outline-help:focus-within \.manual-outline-example/);
+  });
+
+  it("only shows manual outline for guitar-photo pickguard uploads", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /removeBackground && sourcePhoto && pickguardSourceMode === "guitar"/,
+    );
   });
 
   it("uses point segmentation as the only manual cutout action", () => {

@@ -301,7 +301,7 @@ export function UploadPanel({
       {removeBackground ? (
         <CutoutStatus state={cutout} />
       ) : null}
-      {removeBackground && sourcePhoto ? (
+      {removeBackground && sourcePhoto && pickguardSourceMode === "guitar" ? (
         <div className="manual-cutout-actions">
           <div className="manual-outline-help">
             <button

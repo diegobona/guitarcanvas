@@ -80,9 +80,9 @@ export function getInitialStringOverlay(photo: PickguardImageBounds): StringOver
   return {
     enabled: true,
     count: 6,
-    start: { x: round(photo.width * 0.52), y: round(photo.height * 0.34) },
-    end: { x: round(photo.width * 0.46), y: round(photo.height * 0.44) },
-    spread: Math.max(54, photo.width * 0.16),
+    start: { x: round(photo.width * 0.5), y: round(photo.height * 0.34) },
+    end: { x: round(photo.width * 0.5), y: round(photo.height * 0.44) },
+    spread: Math.max(42, photo.width * 0.1),
     opacity: 0.78,
     width: Math.max(1.4, photo.width * 0.0022),
     extension: Math.max(photo.width, photo.height) * 0.55,
