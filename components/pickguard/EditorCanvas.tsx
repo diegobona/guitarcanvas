@@ -404,11 +404,12 @@ export function EditorCanvas({
                 })
               }
             />
-            <span>Draw strings above pickguard</span>
+            <span>Show virtual strings</span>
           </label>
           <label className="field">
             <span>Strings</span>
             <select
+              disabled={!stringOverlay.enabled}
               value={stringOverlay.count}
               onChange={(event) =>
                 onStringOverlayChange({
@@ -426,6 +427,7 @@ export function EditorCanvas({
           <label className="field">
             <span>String spread</span>
             <input
+              disabled={!stringOverlay.enabled}
               max={photo.width * 0.42}
               min="24"
               step="1"
@@ -442,6 +444,7 @@ export function EditorCanvas({
           <label className="field">
             <span>String opacity</span>
             <input
+              disabled={!stringOverlay.enabled}
               max="1"
               min="0.2"
               step="0.01"

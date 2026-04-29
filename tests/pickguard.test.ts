@@ -127,6 +127,26 @@ describe("string overlay builder", () => {
     assert.match(svg, /y1="-110"/);
     assert.match(svg, /y2="980"/);
   });
+
+  it("defaults virtual string visibility from the pickguard upload source", () => {
+    const visualizer = readFileSync(
+      "components/pickguard/PickguardVisualizer.tsx",
+      "utf8",
+    );
+    const uploadPanel = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+    const editorCanvas = readFileSync(
+      "components/pickguard/EditorCanvas.tsx",
+      "utf8",
+    );
+
+    assert.match(uploadPanel, /onPhotoLoaded\(cutoutPhoto, "single"\)/);
+    assert.match(uploadPanel, /onPhotoLoaded\(manualPhoto, "guitar"\)/);
+    assert.match(visualizer, /sourceMode === "single"/);
+    assert.match(editorCanvas, /Show virtual strings/);
+  });
 });
 
 describe("AI background removal helpers", () => {

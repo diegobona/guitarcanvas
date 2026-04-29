@@ -5,7 +5,7 @@ import { useState } from "react";
 import { DesignGenerator } from "./DesignGenerator";
 import { EditorCanvas } from "./EditorCanvas";
 import { ExportPanel } from "./ExportPanel";
-import { UploadPanel } from "./UploadPanel";
+import { UploadPanel, type PickguardSourceMode } from "./UploadPanel";
 import { getTemplateById } from "@/lib/pickguard/templates";
 import { exportMockupJpg } from "@/lib/pickguard/exporters";
 import {
@@ -44,6 +44,8 @@ export function PickguardVisualizer() {
     rotation: 0,
   });
   const [stringOverlay, setStringOverlay] = useState<StringOverlay | null>(null);
+  const [pickguardPhotoSourceMode, setPickguardPhotoSourceMode] =
+    useState<PickguardSourceMode>("single");
   const [exporting, setExporting] = useState<string | null>(null);
 
   const template = getTemplateById("strat");
@@ -56,13 +58,28 @@ export function PickguardVisualizer() {
     setPhoto(nextPhoto);
     setTransform(getInitialTransform(nextPhoto));
     setStickerTransform(getInitialStickerTransform(nextPhoto));
-    setStringOverlay(getInitialStringOverlay(nextPhoto));
+    setStringOverlay({
+      ...getInitialStringOverlay(nextPhoto),
+      enabled: pickguardPhotoSourceMode === "single",
+    });
   }
 
-  function handlePickguardPhotoLoaded(nextPhoto: UploadedPhoto) {
+  function handlePickguardPhotoLoaded(
+    nextPhoto: UploadedPhoto,
+    sourceMode?: PickguardSourceMode,
+  ) {
     setPickguardPhoto(nextPhoto);
+    if (sourceMode) {
+      setPickguardPhotoSourceMode(sourceMode);
+    }
     if (photo) {
       setStickerTransform(getInitialStickerTransform(photo));
+      if (sourceMode) {
+        setStringOverlay((currentOverlay) => ({
+          ...(currentOverlay ?? getInitialStringOverlay(photo)),
+          enabled: sourceMode === "single",
+        }));
+      }
     }
   }
 

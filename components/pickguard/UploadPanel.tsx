@@ -27,7 +27,7 @@ type UploadPanelProps = {
   photo: UploadedPhoto | null;
   allowPickguardSourceMode?: boolean;
   removeBackground?: boolean;
-  onPhotoLoaded: (photo: UploadedPhoto) => void;
+  onPhotoLoaded: (photo: UploadedPhoto, sourceMode?: PickguardSourceMode) => void;
 };
 
 type CutoutState = {
@@ -36,7 +36,7 @@ type CutoutState = {
 };
 
 type ManualMode = "outline" | "target";
-type PickguardSourceMode = "single" | "guitar";
+export type PickguardSourceMode = "single" | "guitar";
 
 export function UploadPanel({
   title,
@@ -125,10 +125,10 @@ export function UploadPanel({
         sourcePhoto: nextPhoto,
         onProgress: handleCutoutProgress,
       });
-      onPhotoLoaded(cutoutPhoto);
+      onPhotoLoaded(cutoutPhoto, "single");
       setCutout({ status: "done", progress: 100 });
     } catch {
-      onPhotoLoaded(nextPhoto);
+      onPhotoLoaded(nextPhoto, "single");
       setCutout({ status: "error", progress: 0 });
       setError("AI cutout failed. The original photo is loaded for now.");
     }
@@ -160,7 +160,7 @@ export function UploadPanel({
           onProgress: handleCutoutProgress,
         },
       );
-      onPhotoLoaded(manualPhoto);
+      onPhotoLoaded(manualPhoto, "guitar");
       setManualResultPhoto(manualPhoto);
       setManualResultHistory([]);
       setCutout({ status: "manualDone", progress: 100 });
