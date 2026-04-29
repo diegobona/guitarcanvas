@@ -335,6 +335,12 @@ a {
   stroke-width: 0.45;
 }
 
+.manual-cutout-point.is-close-handle {
+  fill: #ffe28a;
+  stroke: #111827;
+  stroke-width: 0.55;
+}
+
 .manual-target-point {
   fill: #ff5a62;
   stroke: #fff1cf;

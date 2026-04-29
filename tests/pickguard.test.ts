@@ -835,11 +835,11 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /manualTargetPoint/);
     assert.match(source, /setManualTargetPoint\(point\)/);
     assert.doesNotMatch(source, /setManualTargetPoint\(\(current/);
-    assert.match(source, /Pick inside/);
+    assert.match(source, /Click inside the pickguard/);
     assert.match(source, /Cut out pickguard/);
   });
 
-  it("guides manual cutout as drawing around the edge before picking inside", () => {
+  it("closes the manual outline by clicking the first point before picking inside", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",
       "utf8",
@@ -849,8 +849,10 @@ describe("upload panel hydration guard", () => {
       source,
       /Draw around the pickguard edge\. When the outline surrounds it, click inside the pickguard\./,
     );
-    assert.match(source, /Draw outline/);
-    assert.match(source, /Pick inside/);
+    assert.match(source, /Click the first point to close the outline/);
+    assert.match(source, /isNearFirstPoint/);
+    assert.doesNotMatch(source, /Draw outline/);
+    assert.doesNotMatch(source, /Pick inside/);
     assert.doesNotMatch(source, /pick one point on the pickguard, then segment it/);
   });
 

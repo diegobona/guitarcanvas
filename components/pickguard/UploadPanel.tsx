@@ -4,7 +4,6 @@ import {
   Eraser,
   ImageUp,
   LoaderCircle,
-  LocateFixed,
   RefreshCw,
   Scissors,
   Trash2,
@@ -344,10 +343,17 @@ export function UploadPanel({
           onModeChange={setManualMode}
           onTargetPointChange={(point) => void handleTargetPointChange(point)}
           onUndo={() => {
-            setManualTargetPoint(null);
             setManualSegmentPreview(null);
             setManualPreviewLoading(false);
             previewRequestRef.current += 1;
+            if (manualTargetPoint) {
+              setManualTargetPoint(null);
+              return;
+            }
+            if (manualMode === "target") {
+              setManualMode("outline");
+              return;
+            }
             setManualPoints((currentPoints) => currentPoints.slice(0, -1));
           }}
         />
@@ -446,23 +452,37 @@ function ManualCutoutEditor({
 }: ManualCutoutEditorProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
 
-  function getPhotoPoint(event: ReactPointerEvent<HTMLDivElement>) {
+  function getPhotoClick(event: ReactPointerEvent<HTMLDivElement>) {
     const frame = frameRef.current;
     if (!frame) return null;
 
     const rect = frame.getBoundingClientRect();
     return {
-      x: clamp(((event.clientX - rect.left) / rect.width) * photo.width, 0, photo.width),
-      y: clamp(((event.clientY - rect.top) / rect.height) * photo.height, 0, photo.height),
+      point: {
+        x: clamp(((event.clientX - rect.left) / rect.width) * photo.width, 0, photo.width),
+        y: clamp(((event.clientY - rect.top) / rect.height) * photo.height, 0, photo.height),
+      },
+      rect,
     };
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    const point = getPhotoPoint(event);
-    if (!point) return;
+    const click = getPhotoClick(event);
+    if (!click) return;
+
+    const { point, rect } = click;
 
     if (mode === "target") {
       onTargetPointChange(point);
+      return;
+    }
+
+    if (
+      points.length >= 3 &&
+      points[0] &&
+      isNearFirstPoint(point, points[0], photo, rect)
+    ) {
+      onModeChange("target");
       return;
     }
 
@@ -472,6 +492,13 @@ function ManualCutoutEditor({
   const svgPoints = points
     .map((point) => `${(point.x / photo.width) * 100},${(point.y / photo.height) * 100}`)
     .join(" ");
+  const helperText = targetPoint
+    ? "Ready to cut out."
+    : mode === "target"
+      ? "Click inside the pickguard."
+      : points.length >= 3
+        ? "Click the first point to close the outline, then click inside the pickguard."
+        : "Draw around the pickguard edge. When the outline surrounds it, click inside the pickguard.";
 
   return (
     <div className="manual-cutout-editor">
@@ -500,18 +527,26 @@ function ManualCutoutEditor({
         ) : null}
         <svg aria-hidden viewBox="0 0 100 100" preserveAspectRatio="none">
           {points.length > 1 ? (
-            <polyline className="manual-cutout-line" points={svgPoints} />
+            mode === "target" && points.length > 2 ? (
+              <polygon className="manual-cutout-line" points={svgPoints} />
+            ) : (
+              <polyline className="manual-cutout-line" points={svgPoints} />
+            )
           ) : null}
           {points.length > 2 ? (
             <polygon className="manual-cutout-fill" points={svgPoints} />
           ) : null}
           {points.map((point, index) => (
             <circle
-              className="manual-cutout-point"
+              className={
+                index === 0 && points.length >= 3 && mode === "outline"
+                  ? "manual-cutout-point is-close-handle"
+                  : "manual-cutout-point"
+              }
               cx={(point.x / photo.width) * 100}
               cy={(point.y / photo.height) * 100}
               key={`${point.x}-${point.y}-${index}`}
-              r="1.35"
+              r={index === 0 && points.length >= 3 && mode === "outline" ? "1.8" : "1.35"}
             />
           ))}
           {targetPoint ? (
@@ -524,29 +559,7 @@ function ManualCutoutEditor({
           ) : null}
         </svg>
       </div>
-      <p className="helper-text">
-        Draw around the pickguard edge. When the outline surrounds it, click inside the pickguard.
-      </p>
-      <div className="manual-mode-row manual-tool-row">
-        <button
-          className={mode === "outline" ? "primary-button" : "secondary-button"}
-          disabled={applying}
-          type="button"
-          onClick={() => onModeChange("outline")}
-        >
-          <Scissors aria-hidden size={17} />
-          Draw outline
-        </button>
-        <button
-          className={mode === "target" ? "primary-button" : "secondary-button"}
-          disabled={points.length < 3 || applying}
-          type="button"
-          onClick={() => onModeChange("target")}
-        >
-          <LocateFixed aria-hidden size={17} />
-          Pick inside
-        </button>
-      </div>
+      <p className="helper-text">{helperText}</p>
       <div className="manual-cutout-toolbar">
         <button
           className="icon-button"
@@ -578,6 +591,17 @@ function ManualCutoutEditor({
       </div>
     </div>
   );
+}
+
+function isNearFirstPoint(
+  point: Point,
+  firstPoint: Point,
+  photo: UploadedPhoto,
+  rect: DOMRect,
+) {
+  const dx = ((point.x - firstPoint.x) / photo.width) * rect.width;
+  const dy = ((point.y - firstPoint.y) / photo.height) * rect.height;
+  return Math.hypot(dx, dy) <= 24;
 }
 
 function readFileAsDataUrl(file: File) {
