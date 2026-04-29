@@ -360,7 +360,59 @@ a {
 }
 
 .source-mode-row {
+  background: #111318;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 10px;
+  padding: 6px;
+}
+
+.source-mode-option {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  display: grid;
+  font-weight: 800;
+  gap: 6px;
+  grid-template-columns: auto 1fr;
+  justify-items: start;
+  min-height: 58px;
+  padding: 9px 10px;
+  text-align: left;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.source-mode-option:hover {
+  background: #20242c;
+  color: var(--ink);
+}
+
+.source-mode-option.is-selected {
+  background: rgba(215, 168, 79, 0.12);
+  border-color: rgba(240, 191, 97, 0.68);
+  color: var(--ink);
+}
+
+.source-mode-option.is-selected::before {
+  background: var(--accent-strong);
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px rgba(240, 191, 97, 0.15);
+  content: "";
+  height: 8px;
+  justify-self: center;
+  width: 8px;
+}
+
+.source-mode-option.is-selected svg {
+  display: none;
 }
 
 .result-cleanup-header {
@@ -664,6 +716,18 @@ a {
 
 .export-grid {
   grid-template-columns: 1fr;
+}
+
+.export-current-version-note {
+  background: rgba(215, 168, 79, 0.12);
+  border: 1px solid rgba(215, 168, 79, 0.54);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 0.92rem;
+  font-weight: 750;
+  line-height: 1.45;
+  margin: 12px 0 0;
+  padding: 10px 12px;
 }
 
 @keyframes spin {

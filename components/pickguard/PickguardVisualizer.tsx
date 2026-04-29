@@ -96,10 +96,6 @@ export function PickguardVisualizer() {
           Upload your guitar photo, try custom pickguard designs, and export
           printable design files.
         </p>
-        <div className="disclaimer">
-          First version exports visual mockups and print-reference files. It
-          does not guarantee exact screw-hole or CNC cutting accuracy.
-        </div>
       </section>
 
       <section className="visualizer-grid" aria-label="Pickguard visualizer">

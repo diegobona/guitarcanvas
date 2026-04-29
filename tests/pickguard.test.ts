@@ -734,6 +734,24 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /pickguardSourceMode/);
   });
 
+  it("styles pickguard source choices as options instead of action buttons", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+    const css = readFileSync("app/globals.css", "utf8");
+    const sourceModeMarkup = source.match(
+      /<div className="source-mode-row">[\s\S]*?<\/div>/,
+    )?.[0] ?? "";
+
+    assert.match(sourceModeMarkup, /source-mode-option/);
+    assert.match(sourceModeMarkup, /is-selected/);
+    assert.doesNotMatch(sourceModeMarkup, /primary-button/);
+    assert.doesNotMatch(sourceModeMarkup, /secondary-button/);
+    assert.match(css, /\.source-mode-option/);
+    assert.match(css, /\.source-mode-option\.is-selected/);
+  });
+
   it("skips automatic background removal when the pickguard source is a guitar photo", () => {
     const source = readFileSync(
       "components/pickguard/UploadPanel.tsx",
@@ -859,6 +877,41 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /InteractiveSegmenter/);
     assert.match(source, /keypoint/);
     assert.match(source, /createPointSegmentedManualCutout/);
+  });
+});
+
+describe("visualizer copy", () => {
+  it("keeps helper copy concise and labels optional AI patterns clearly", () => {
+    const visualizer = readFileSync(
+      "components/pickguard/PickguardVisualizer.tsx",
+      "utf8",
+    );
+    const uploadPanel = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+    const designGenerator = readFileSync(
+      "components/pickguard/DesignGenerator.tsx",
+      "utf8",
+    );
+
+    assert.doesNotMatch(visualizer, /First version exports visual mockups/);
+    assert.doesNotMatch(uploadPanel, /Free browser AI removes backgrounds/);
+    assert.match(designGenerator, /AI-generated pickguard pattern \(optional\)/);
+    assert.doesNotMatch(designGenerator, /3\. Optional pattern/);
+  });
+
+  it("highlights export limitations as current-version-only copy", () => {
+    const exportPanel = readFileSync(
+      "components/pickguard/ExportPanel.tsx",
+      "utf8",
+    );
+    const css = readFileSync("app/globals.css", "utf8");
+
+    assert.match(exportPanel, /export-current-version-note/);
+    assert.match(exportPanel, /Current version/);
+    assert.doesNotMatch(exportPanel, /Export files are visual mockups/);
+    assert.match(css, /\.export-current-version-note/);
   });
 });
 

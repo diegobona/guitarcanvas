@@ -60,9 +60,9 @@ export function ExportPanel({
           {exporting === "svg" ? "Exporting..." : "Export SVG Package"}
         </button>
       </div>
-      <p className="helper-text">
-        Export files are visual mockups and print references, not CNC-ready
-        templates.
+      <p className="export-current-version-note">
+        Current version: exports are for visual mockups and print reference only.
+        CNC-ready templates and exact screw-hole cutting accuracy are not supported yet.
       </p>
     </section>
   );

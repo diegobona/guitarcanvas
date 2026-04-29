@@ -240,13 +240,12 @@ export function UploadPanel({
     <section className="panel">
       <h2>{title}</h2>
       {allowPickguardSourceMode ? (
-        <div className="manual-mode-row source-mode-row">
+        <div className="source-mode-row">
           <button
-            className={
-              pickguardSourceMode === "single"
-                ? "primary-button"
-                : "secondary-button"
-            }
+            aria-pressed={pickguardSourceMode === "single"}
+            className={`source-mode-option ${
+              pickguardSourceMode === "single" ? "is-selected" : ""
+            }`}
             disabled={cutout.status === "removing"}
             type="button"
             onClick={() => setPickguardSourceMode("single")}
@@ -255,11 +254,10 @@ export function UploadPanel({
             Single pickguard image
           </button>
           <button
-            className={
-              pickguardSourceMode === "guitar"
-                ? "primary-button"
-                : "secondary-button"
-            }
+            aria-pressed={pickguardSourceMode === "guitar"}
+            className={`source-mode-option ${
+              pickguardSourceMode === "guitar" ? "is-selected" : ""
+            }`}
             disabled={cutout.status === "removing"}
             type="button"
             onClick={() => setPickguardSourceMode("guitar")}
@@ -373,12 +371,7 @@ export function UploadPanel({
 
 function CutoutStatus({ state }: { state: CutoutState }) {
   if (state.status === "idle") {
-    return (
-      <p className="helper-text">
-        Free browser AI removes backgrounds. Use manual outline when the source
-        includes the whole guitar.
-      </p>
-    );
+    return null;
   }
 
   if (state.status === "removing") {

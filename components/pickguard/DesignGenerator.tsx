@@ -27,7 +27,7 @@ export function DesignGenerator({
 }: DesignGeneratorProps) {
   return (
     <section className="panel">
-      <h2>3. Optional pattern</h2>
+      <h2>3. AI-generated pickguard pattern (optional)</h2>
       <div className="prompt-row">
         <textarea
           className="prompt-input"
