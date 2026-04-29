@@ -1001,6 +1001,8 @@ describe("visualizer copy", () => {
     assert.doesNotMatch(visualizer, /First version exports visual mockups/);
     assert.doesNotMatch(uploadPanel, /Free browser AI removes backgrounds/);
     assert.match(designGenerator, /AI-generated pickguard pattern \(optional\)/);
+    assert.match(designGenerator, /Current version: sample patterns only\./);
+    assert.match(designGenerator, /Real AI generation is coming soon\./);
     assert.doesNotMatch(designGenerator, /3\. Optional pattern/);
   });
 

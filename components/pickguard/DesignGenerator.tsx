@@ -28,6 +28,9 @@ export function DesignGenerator({
   return (
     <section className="panel">
       <h2>3. AI-generated pickguard pattern (optional)</h2>
+      <p className="helper-text">
+        Current version: sample patterns only. Real AI generation is coming soon.
+      </p>
       <div className="prompt-row">
         <textarea
           className="prompt-input"
