@@ -812,7 +812,7 @@ describe("upload panel hydration guard", () => {
       /import \{[^}]*createPointSegmentedManualCutout[^}]*\} from/,
     );
     assert.doesNotMatch(source, /createManualCutout/);
-    assert.match(source, /Segment from point/);
+    assert.match(source, /Cut out pickguard/);
     assert.doesNotMatch(source, /Clean body color/);
   });
 
@@ -835,8 +835,23 @@ describe("upload panel hydration guard", () => {
     assert.match(source, /manualTargetPoint/);
     assert.match(source, /setManualTargetPoint\(point\)/);
     assert.doesNotMatch(source, /setManualTargetPoint\(\(current/);
-    assert.match(source, /Pick target/);
-    assert.match(source, /Segment from point/);
+    assert.match(source, /Pick inside/);
+    assert.match(source, /Cut out pickguard/);
+  });
+
+  it("guides manual cutout as drawing around the edge before picking inside", () => {
+    const source = readFileSync(
+      "components/pickguard/UploadPanel.tsx",
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /Draw around the pickguard edge\. When the outline surrounds it, click inside the pickguard\./,
+    );
+    assert.match(source, /Draw outline/);
+    assert.match(source, /Pick inside/);
+    assert.doesNotMatch(source, /pick one point on the pickguard, then segment it/);
   });
 
   it("previews the point-selected region before applying the cutout", () => {

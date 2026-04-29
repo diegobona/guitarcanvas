@@ -525,7 +525,7 @@ function ManualCutoutEditor({
         </svg>
       </div>
       <p className="helper-text">
-        Click around the pickguard, pick one point on the pickguard, then segment it.
+        Draw around the pickguard edge. When the outline surrounds it, click inside the pickguard.
       </p>
       <div className="manual-mode-row manual-tool-row">
         <button
@@ -544,7 +544,7 @@ function ManualCutoutEditor({
           onClick={() => onModeChange("target")}
         >
           <LocateFixed aria-hidden size={17} />
-          Pick target
+          Pick inside
         </button>
       </div>
       <div className="manual-cutout-toolbar">
@@ -573,7 +573,7 @@ function ManualCutoutEditor({
           onClick={onApplySegment}
         >
           <WandSparkles aria-hidden size={17} />
-          Segment from point
+          Cut out pickguard
         </button>
       </div>
     </div>
