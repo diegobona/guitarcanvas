@@ -1038,6 +1038,30 @@ describe("visualizer copy", () => {
     assert.doesNotMatch(exportPanel, /Export files are visual mockups/);
     assert.match(css, /\.export-current-version-note/);
   });
+
+  it("labels pickguard transform controls explicitly", () => {
+    const editorCanvas = readFileSync(
+      "components/pickguard/EditorCanvas.tsx",
+      "utf8",
+    );
+
+    assert.match(editorCanvas, /Scale pickguard/);
+    assert.match(editorCanvas, /Rotate pickguard/);
+    assert.doesNotMatch(editorCanvas, /<span>Scale<\/span>/);
+    assert.doesNotMatch(editorCanvas, /<span>Rotate<\/span>/);
+  });
+
+  it("clips generated pattern previews to the uploaded pickguard cutout", () => {
+    const editorCanvas = readFileSync(
+      "components/pickguard/EditorCanvas.tsx",
+      "utf8",
+    );
+
+    assert.match(editorCanvas, /className="pickguard-pattern-fill"/);
+    assert.match(editorCanvas, /WebkitMaskImage/);
+    assert.match(editorCanvas, /maskImage/);
+    assert.match(editorCanvas, /pickguardPhoto\.dataUrl/);
+  });
 });
 
 type TestPixel = {

@@ -257,6 +257,16 @@ export function EditorCanvas({
                     alt=""
                     className="pickguard-pattern-fill"
                     draggable={false}
+                    style={{
+                      WebkitMaskImage: `url(${pickguardPhoto.dataUrl})`,
+                      WebkitMaskPosition: "center",
+                      WebkitMaskRepeat: "no-repeat",
+                      WebkitMaskSize: "100% 100%",
+                      maskImage: `url(${pickguardPhoto.dataUrl})`,
+                      maskPosition: "center",
+                      maskRepeat: "no-repeat",
+                      maskSize: "100% 100%",
+                    }}
                     src={design.imageDataUrl}
                   />
                 ) : null}
@@ -345,7 +355,7 @@ export function EditorCanvas({
 
       <div className="editor-controls">
         <label className="field">
-          <span>Scale</span>
+          <span>Scale pickguard</span>
           <input
             disabled={!photo || !pickguardPhoto}
             max="2.5"
@@ -362,7 +372,7 @@ export function EditorCanvas({
           />
         </label>
         <label className="field">
-          <span>Rotate</span>
+          <span>Rotate pickguard</span>
           <input
             disabled={!photo || !pickguardPhoto}
             max="180"
